@@ -1,23 +1,23 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import get_settings
-# from app.api.v1.router import api_router
-# from app.database import engine, Base
+from app.api.v1.cluster import router as cluster_router
+from app.database import engine, Base
 
 settings = get_settings()
 
-# Create Tables (In production use Alembic)
-# Base.metadata.create_all(bind=engine)
+# Create Tables (Automatic for Dev, use Alembic for Prod)
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
     openapi_url=f"{settings.API_V1_STR}/openapi.json"
 )
 
-# CORS
+# CORS configuration
 origins = [
     "http://localhost:3000",
-    "http://localhost",
+    "http://127.0.0.1:3000",
 ]
 
 app.add_middleware(
@@ -28,7 +28,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# app.include_router(api_router, prefix=settings.API_V1_STR)
+# Include Routers
+app.include_router(cluster_router, prefix=f"{settings.API_V1_STR}/clusters", tags=["clusters"])
 
 @app.get("/")
 def root():
