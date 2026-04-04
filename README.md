@@ -144,27 +144,75 @@ pveum user token add root@pam nexus --privsep 0
 - **Auth User**: `root@pam!nexus` (full token id)
 - **Auth Token**: il secret UUID
 
-## Installazione in container LXC su Proxmox
+## Installazione automatica su Proxmox (Helper Script)
+
+**Un solo comando** su SSH del nodo Proxmox come root:
 
 ```bash
-# Sul nodo Proxmox host
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/manueleesposito77-HAL/proxmox-manager/main/scripts/proxmox-helper.sh)"
+```
+
+Lo script:
+1. Scarica il template Debian 12 (se manca)
+2. Crea un LXC unprivileged con nesting+keyctl abilitati
+3. Installa Docker, clona Nexus, genera le chiavi, avvia lo stack
+4. Stampa IP, password root generata e URL UI
+
+### Parametri personalizzabili (env vars)
+
+```bash
+CT_ID=200 HOSTNAME=nexus MEMORY=4096 DISK_SIZE=16 STORAGE=local-zfs \
+  bash -c "$(curl -fsSL https://raw.githubusercontent.com/manueleesposito77-HAL/proxmox-manager/main/scripts/proxmox-helper.sh)"
+```
+
+| Variabile | Default | Note |
+|---|---|---|
+| `CT_ID` | `pvesh get /cluster/nextid` | ID del container |
+| `HOSTNAME` | `nexus-manager` | |
+| `CORES` | `2` | |
+| `MEMORY` | `2048` | MB |
+| `SWAP` | `512` | MB |
+| `DISK_SIZE` | `12` | GB |
+| `STORAGE` | `local-lvm` | Storage del rootfs |
+| `BRIDGE` | `vmbr0` | |
+| `NET_CONFIG` | `dhcp` | oppure `10.0.0.10/24,gw=10.0.0.1` |
+| `PASSWORD` | autogenerata | root password del container |
+
+### Installazione manuale in container LXC
+
+Se preferisci creare il container a mano:
+
+```bash
+# Sul nodo Proxmox host (serve nesting+keyctl per Docker dentro LXC)
 pct create 200 local:vztmpl/debian-12-standard_12.2-1_amd64.tar.zst \
   --hostname nexus-manager \
   --cores 2 --memory 2048 --swap 512 \
   --net0 name=eth0,bridge=vmbr0,ip=dhcp \
-  --rootfs local-lvm:8 \
+  --rootfs local-lvm:12 \
   --features nesting=1,keyctl=1 \
-  --unprivileged 1
+  --unprivileged 1 \
+  --password "$(openssl rand -base64 12)"
 
 pct start 200
-pct enter 200
+pct exec 200 -- bash -c "curl -fsSL https://raw.githubusercontent.com/manueleesposito77-HAL/proxmox-manager/main/scripts/install.sh | bash"
+```
 
-# Dentro il container
-apt update && apt install -y docker.io docker-compose git python3-cryptography openssl
-git clone https://github.com/manueleesposito77-HAL/proxmox-manager.git
-cd proxmox-manager
-# ... segui lo script setup come sopra
-docker-compose up --build -d
+## Export template LXC (per distribuzione)
+
+Se vuoi creare un `.tar.zst` riutilizzabile dopo aver installato in un container:
+
+```bash
+# Sul nodo Proxmox, dopo aver configurato il container ID 200
+pct stop 200
+vzdump 200 --mode stop --compress zstd --dumpdir /var/lib/vz/template/cache/
+# Rinomina il file in nexus-manager-v1.0.0.tar.zst
+pct start 200
+```
+
+Il file può poi essere importato su altri Proxmox:
+```bash
+pct restore 300 /var/lib/vz/template/cache/nexus-manager-v1.0.0.tar.zst \
+  --storage local-lvm --rootfs local-lvm:12
 ```
 
 ## Ruoli e permessi
