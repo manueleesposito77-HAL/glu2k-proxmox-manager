@@ -4,6 +4,49 @@ Web app completa per la gestione centralizzata di più cluster **Proxmox VE** co
 
 ![version](https://img.shields.io/badge/version-1.0.0-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![stack](https://img.shields.io/badge/stack-FastAPI%20%2B%20React-purple)
 
+---
+
+## 🚀 Installazione come container LXC su Proxmox (un comando)
+
+**SSH sul nodo Proxmox come root** e incolla:
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/manueleesposito77-HAL/glu2k-proxmox-manager/main/scripts/proxmox-helper.sh)"
+```
+
+Lo script:
+1. 📦 Scarica il template Debian 12
+2. 🐧 Crea un **LXC unprivileged** con `nesting=1` e `keyctl=1` (necessari per Docker dentro LXC)
+3. 🔧 Installa Docker, clona il repo, genera chiavi Fernet, avvia lo stack
+4. ✅ Stampa IP del container, password root generata e URL della Web UI
+
+Al termine:
+- 🌐 **UI**: `http://<IP>:3000`
+- 🔐 **Login**: `admin` / `admin` *(cambialo subito!)*
+
+### Personalizzazione (variabili d'ambiente)
+
+```bash
+CT_ID=200 HOSTNAME=glu2k MEMORY=4096 DISK_SIZE=16 STORAGE=local-zfs BRIDGE=vmbr0 \
+  bash -c "$(curl -fsSL https://raw.githubusercontent.com/manueleesposito77-HAL/glu2k-proxmox-manager/main/scripts/proxmox-helper.sh)"
+```
+
+| Variabile | Default | Note |
+|---|---|---|
+| `CT_ID` | next free | ID LXC |
+| `HOSTNAME` | `glu2k-manager` | |
+| `CORES` | `2` | |
+| `MEMORY` | `2048` (MB) | |
+| `SWAP` | `512` (MB) | |
+| `DISK_SIZE` | `12` (GB) | |
+| `STORAGE` | `local-lvm` | Storage del rootfs |
+| `BRIDGE` | `vmbr0` | |
+| `NET_CONFIG` | `dhcp` | oppure `10.0.0.10/24,gw=10.0.0.1` |
+| `PASSWORD` | autogenerata | root pwd container |
+| `UNPRIVILEGED` | `1` | `0` per privileged |
+
+---
+
 ## Caratteristiche principali
 
 ### Autenticazione & RBAC
@@ -144,43 +187,9 @@ pveum user token add root@pam glu2k --privsep 0
 - **Auth User**: `root@pam!glu2k` (full token id)
 - **Auth Token**: il secret UUID
 
-## Installazione automatica su Proxmox (Helper Script)
+## Installazione manuale in container LXC su Proxmox
 
-**Un solo comando** su SSH del nodo Proxmox come root:
-
-```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/manueleesposito77-HAL/glu2k-proxmox-manager/main/scripts/proxmox-helper.sh)"
-```
-
-Lo script:
-1. Scarica il template Debian 12 (se manca)
-2. Crea un LXC unprivileged con nesting+keyctl abilitati
-3. Installa Docker, clona Glu2k, genera le chiavi, avvia lo stack
-4. Stampa IP, password root generata e URL UI
-
-### Parametri personalizzabili (env vars)
-
-```bash
-CT_ID=200 HOSTNAME=glu2k MEMORY=4096 DISK_SIZE=16 STORAGE=local-zfs \
-  bash -c "$(curl -fsSL https://raw.githubusercontent.com/manueleesposito77-HAL/glu2k-proxmox-manager/main/scripts/proxmox-helper.sh)"
-```
-
-| Variabile | Default | Note |
-|---|---|---|
-| `CT_ID` | `pvesh get /cluster/nextid` | ID del container |
-| `HOSTNAME` | `glu2k-manager` | |
-| `CORES` | `2` | |
-| `MEMORY` | `2048` | MB |
-| `SWAP` | `512` | MB |
-| `DISK_SIZE` | `12` | GB |
-| `STORAGE` | `local-lvm` | Storage del rootfs |
-| `BRIDGE` | `vmbr0` | |
-| `NET_CONFIG` | `dhcp` | oppure `10.0.0.10/24,gw=10.0.0.1` |
-| `PASSWORD` | autogenerata | root password del container |
-
-### Installazione manuale in container LXC
-
-Se preferisci creare il container a mano:
+Se preferisci creare il container a mano invece di usare l'[helper script](#-installazione-come-container-lxc-su-proxmox-un-comando):
 
 ```bash
 # Sul nodo Proxmox host (serve nesting+keyctl per Docker dentro LXC)
