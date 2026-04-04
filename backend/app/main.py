@@ -58,7 +58,7 @@ app.include_router(cluster_router, prefix=f"{settings.API_V1_STR}/clusters", tag
 
 @app.get("/")
 def root():
-    return {"message": "Welcome to Nexus Proxmox Manager API"}
+    return {"message": "Welcome to Glu2k Proxmox Manager API"}
 
 @app.get("/health")
 def health_check():

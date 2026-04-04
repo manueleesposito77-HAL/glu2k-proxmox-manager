@@ -6,15 +6,15 @@ const API_BASE = "http://localhost:8000/api/v1";
 
 // Setup axios auth interceptor
 axios.interceptors.request.use(config => {
-  const token = localStorage.getItem('nexus_token');
+  const token = localStorage.getItem('glu2k_token');
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
 axios.interceptors.response.use(r => r, err => {
   if (err.response?.status === 401) {
-    localStorage.removeItem('nexus_token');
-    localStorage.removeItem('nexus_user');
-    window.dispatchEvent(new Event('nexus_logout'));
+    localStorage.removeItem('glu2k_token');
+    localStorage.removeItem('glu2k_user');
+    window.dispatchEvent(new Event('glu2k_logout'));
   }
   return Promise.reject(err);
 });
@@ -31,8 +31,8 @@ const LoginPage = ({ onLogin }) => {
     setError(null);
     try {
       const res = await axios.post(`${API_BASE}/auth/login`, { username, password });
-      localStorage.setItem('nexus_token', res.data.access_token);
-      localStorage.setItem('nexus_user', JSON.stringify(res.data.user));
+      localStorage.setItem('glu2k_token', res.data.access_token);
+      localStorage.setItem('glu2k_user', JSON.stringify(res.data.user));
       onLogin(res.data.user);
     } catch (err) {
       setError(err.response?.data?.detail || 'Errore login');
@@ -44,7 +44,7 @@ const LoginPage = ({ onLogin }) => {
       <div className="w-full max-w-md bg-slate-800 rounded-xl border border-slate-700 p-8 shadow-2xl">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-blue-400 flex items-center justify-center gap-2">
-            <Server className="w-8 h-8"/> NEXUS
+            <Server className="w-8 h-8"/> GLU2K
           </h1>
           <p className="text-slate-400 text-sm mt-2">Proxmox Manager</p>
         </div>
@@ -322,7 +322,7 @@ const NodeDetail = ({ cluster, nodeName, onBack }) => {
     { id: 'fwlog', title: 'Log Firewall Nodo' },
     { id: 'updates', title: 'Aggiornamenti' },
   ];
-  const { sections, toggle, move, reset } = useSectionManager(`nexus_node_sections`, sectionMeta);
+  const { sections, toggle, move, reset } = useSectionManager(`glu2k_node_sections`, sectionMeta);
   const isVisible = (id) => sections.find(s => s.id === id)?.visible;
 
   const refreshAptList = async () => {
@@ -1891,7 +1891,7 @@ const VMDetail = ({ cluster, vm, onBack }) => {
     { id: 'tasks', title: 'Log Tasks VM' },
     { id: 'raw', title: 'Config raw' },
   ];
-  const { sections: vmSections, toggle: vmToggle, move: vmMove, reset: vmReset } = useSectionManager('nexus_vm_sections', vmSectionMeta);
+  const { sections: vmSections, toggle: vmToggle, move: vmMove, reset: vmReset } = useSectionManager('glu2k_vm_sections', vmSectionMeta);
 
   if (loading) return (
     <div className="flex items-center justify-center p-12 text-slate-400">
@@ -2276,7 +2276,7 @@ const ClusterDetail = ({ cluster, onSelectNode, onSelectVM }) => {
     { id: 'firewall', title: 'Firewall Cluster' },
     { id: 'tasks', title: 'Log Tasks Cluster' },
   ];
-  const { sections, toggle, move, reset } = useSectionManager('nexus_cluster_sections', sectionMeta);
+  const { sections, toggle, move, reset } = useSectionManager('glu2k_cluster_sections', sectionMeta);
   const isVisible = (id) => sections.find(s => s.id === id)?.visible;
 
   const doAction = async (vm, action) => {
@@ -2517,19 +2517,19 @@ const ClusterDetail = ({ cluster, onSelectNode, onSelectVM }) => {
 
 function App() {
   const [currentUser, setCurrentUser] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('nexus_user') || 'null'); } catch { return null; }
+    try { return JSON.parse(localStorage.getItem('glu2k_user') || 'null'); } catch { return null; }
   });
   const [showUsers, setShowUsers] = useState(false);
 
   useEffect(() => {
     const onLogout = () => setCurrentUser(null);
-    window.addEventListener('nexus_logout', onLogout);
-    return () => window.removeEventListener('nexus_logout', onLogout);
+    window.addEventListener('glu2k_logout', onLogout);
+    return () => window.removeEventListener('glu2k_logout', onLogout);
   }, []);
 
   const logout = () => {
-    localStorage.removeItem('nexus_token');
-    localStorage.removeItem('nexus_user');
+    localStorage.removeItem('glu2k_token');
+    localStorage.removeItem('glu2k_user');
     setCurrentUser(null);
   };
 
@@ -2539,13 +2539,13 @@ function App() {
 }
 
 function MainApp({ currentUser, onLogout, showUsers, setShowUsers }) {
-  const [theme, setTheme] = useState(() => localStorage.getItem('nexus_theme') || 'dark');
+  const [theme, setTheme] = useState(() => localStorage.getItem('glu2k_theme') || 'dark');
 
   useEffect(() => {
     const classes = ['theme-dark', 'theme-light', 'theme-gray'];
     document.documentElement.classList.remove(...classes);
     document.documentElement.classList.add(`theme-${theme}`);
-    localStorage.setItem('nexus_theme', theme);
+    localStorage.setItem('glu2k_theme', theme);
   }, [theme]);
 
   const [clusters, setClusters] = useState([]);
@@ -2640,7 +2640,7 @@ function MainApp({ currentUser, onLogout, showUsers, setShowUsers }) {
       <aside className="fixed left-0 top-0 h-full w-64 bg-slate-800 border-r border-slate-700 flex flex-col">
         <div className="p-6">
           <h1 className="text-xl font-bold text-blue-400 flex items-center gap-2">
-            <Server className="w-6 h-6" /> NEXUS
+            <Server className="w-6 h-6" /> GLU2K
           </h1>
         </div>
         <div className="flex-1 overflow-y-auto">

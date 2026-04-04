@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Nexus Proxmox Manager - installer dentro un container Debian/Ubuntu
+# Glu2k Proxmox Manager - installer dentro un container Debian/Ubuntu
 # Da eseguire DENTRO il container LXC
 
 set -euo pipefail
 
-INSTALL_DIR="${INSTALL_DIR:-/opt/proxmox-manager}"
-REPO="https://github.com/manueleesposito77-HAL/proxmox-manager.git"
+INSTALL_DIR="${INSTALL_DIR:-/opt/glu2k-proxmox-manager}"
+REPO="https://github.com/manueleesposito77-HAL/glu2k-proxmox-manager.git"
 
-echo "=== Nexus Proxmox Manager installer ==="
+echo "=== Glu2k Proxmox Manager installer ==="
 echo
 
 # Update
@@ -59,7 +59,7 @@ IP=$(hostname -I | awk '{print $1}')
 
 echo
 echo "============================================"
-echo " Nexus Proxmox Manager installato!"
+echo " Glu2k Proxmox Manager installato!"
 echo " URL:     http://${IP}:3000"
 echo " API:     http://${IP}:8000/docs"
 echo " Login:   admin / admin (cambiala subito!)"

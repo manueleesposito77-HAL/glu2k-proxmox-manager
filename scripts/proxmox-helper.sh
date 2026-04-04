@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Nexus Proxmox Manager - Helper Script per Proxmox VE host
+# Glu2k Proxmox Manager - Helper Script per Proxmox VE host
 # Crea un container LXC e installa tutto automaticamente.
 #
 # Uso (SSH sul nodo Proxmox come root):
-#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/manueleesposito77-HAL/proxmox-manager/main/scripts/proxmox-helper.sh)"
+#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/manueleesposito77-HAL/glu2k-proxmox-manager/main/scripts/proxmox-helper.sh)"
 
 set -euo pipefail
 
@@ -94,14 +94,14 @@ done
 sleep 3
 
 # ==== Installa dentro il container ====
-info "Installo Nexus dentro il container..."
+info "Installo Glu2k dentro il container..."
 pct exec "$CT_ID" -- bash -c "
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq
   apt-get install -y -qq curl ca-certificates
 "
 
-pct exec "$CT_ID" -- bash -c "curl -fsSL https://raw.githubusercontent.com/manueleesposito77-HAL/proxmox-manager/main/scripts/install.sh | bash"
+pct exec "$CT_ID" -- bash -c "curl -fsSL https://raw.githubusercontent.com/manueleesposito77-HAL/glu2k-proxmox-manager/main/scripts/install.sh | bash"
 
 # ==== Info finale ====
 IP=$(pct exec "$CT_ID" -- hostname -I 2>/dev/null | awk '{print $1}')
@@ -112,7 +112,7 @@ echo " Container ID:  $CT_ID ($HOSTNAME)"
 echo " IP:            $IP"
 echo " Root pwd:      $PASSWORD"
 echo
-echo " Nexus Web UI:  http://${IP}:3000"
+echo " Glu2k Web UI:  http://${IP}:3000"
 echo " API docs:      http://${IP}:8000/docs"
 echo " Login:         admin / admin"
 echo "============================================"

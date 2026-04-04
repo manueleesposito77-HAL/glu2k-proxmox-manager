@@ -1,4 +1,4 @@
-# Nexus Proxmox Manager
+# Glu2k Proxmox Manager
 
 Web app completa per la gestione centralizzata di più cluster **Proxmox VE** con autenticazione, ruoli, firewall, networking e monitoring in tempo reale.
 
@@ -93,8 +93,8 @@ Web app completa per la gestione centralizzata di più cluster **Proxmox VE** co
 
 ```bash
 # 1. Clone
-git clone https://github.com/manueleesposito77-HAL/proxmox-manager.git
-cd proxmox-manager
+git clone https://github.com/manueleesposito77-HAL/glu2k-proxmox-manager.git
+cd glu2k-proxmox-manager
 
 # 2. Crea il file .env con le chiavi
 cat > backend/.env <<EOF
@@ -108,7 +108,7 @@ EOF
 docker-compose up --build -d
 
 # 4. Attendi che il backend sia pronto
-docker logs -f nexus-api
+docker logs -f glu2k-api
 ```
 
 Apri http://localhost:3000 → login con **admin / admin** → cambia la password subito.
@@ -126,22 +126,22 @@ Swagger UI: http://localhost:8000/docs
 
 ## Generare un API Token Proxmox
 
-Nexus usa token API Proxmox (non password) per massima sicurezza.
+Glu2k usa token API Proxmox (non password) per massima sicurezza.
 
 ### Via Web UI Proxmox
 1. Datacenter → Permissions → **API Tokens** → Add
 2. User: `root@pam` (o altro)
-3. Token ID: es. `nexus`
+3. Token ID: es. `glu2k`
 4. ⚠️ **Deseleziona** "Privilege Separation" (altrimenti il token ha 0 permessi)
 5. Copia subito il **Secret** UUID (non è più visibile dopo)
 
 ### Via CLI (sul nodo Proxmox)
 ```bash
-pveum user token add root@pam nexus --privsep 0
+pveum user token add root@pam glu2k --privsep 0
 ```
 
-### Nel form Nexus
-- **Auth User**: `root@pam!nexus` (full token id)
+### Nel form Glu2k
+- **Auth User**: `root@pam!glu2k` (full token id)
 - **Auth Token**: il secret UUID
 
 ## Installazione automatica su Proxmox (Helper Script)
@@ -149,26 +149,26 @@ pveum user token add root@pam nexus --privsep 0
 **Un solo comando** su SSH del nodo Proxmox come root:
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/manueleesposito77-HAL/proxmox-manager/main/scripts/proxmox-helper.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/manueleesposito77-HAL/glu2k-proxmox-manager/main/scripts/proxmox-helper.sh)"
 ```
 
 Lo script:
 1. Scarica il template Debian 12 (se manca)
 2. Crea un LXC unprivileged con nesting+keyctl abilitati
-3. Installa Docker, clona Nexus, genera le chiavi, avvia lo stack
+3. Installa Docker, clona Glu2k, genera le chiavi, avvia lo stack
 4. Stampa IP, password root generata e URL UI
 
 ### Parametri personalizzabili (env vars)
 
 ```bash
-CT_ID=200 HOSTNAME=nexus MEMORY=4096 DISK_SIZE=16 STORAGE=local-zfs \
-  bash -c "$(curl -fsSL https://raw.githubusercontent.com/manueleesposito77-HAL/proxmox-manager/main/scripts/proxmox-helper.sh)"
+CT_ID=200 HOSTNAME=glu2k MEMORY=4096 DISK_SIZE=16 STORAGE=local-zfs \
+  bash -c "$(curl -fsSL https://raw.githubusercontent.com/manueleesposito77-HAL/glu2k-proxmox-manager/main/scripts/proxmox-helper.sh)"
 ```
 
 | Variabile | Default | Note |
 |---|---|---|
 | `CT_ID` | `pvesh get /cluster/nextid` | ID del container |
-| `HOSTNAME` | `nexus-manager` | |
+| `HOSTNAME` | `glu2k-manager` | |
 | `CORES` | `2` | |
 | `MEMORY` | `2048` | MB |
 | `SWAP` | `512` | MB |
@@ -185,7 +185,7 @@ Se preferisci creare il container a mano:
 ```bash
 # Sul nodo Proxmox host (serve nesting+keyctl per Docker dentro LXC)
 pct create 200 local:vztmpl/debian-12-standard_12.2-1_amd64.tar.zst \
-  --hostname nexus-manager \
+  --hostname glu2k-manager \
   --cores 2 --memory 2048 --swap 512 \
   --net0 name=eth0,bridge=vmbr0,ip=dhcp \
   --rootfs local-lvm:12 \
@@ -194,7 +194,7 @@ pct create 200 local:vztmpl/debian-12-standard_12.2-1_amd64.tar.zst \
   --password "$(openssl rand -base64 12)"
 
 pct start 200
-pct exec 200 -- bash -c "curl -fsSL https://raw.githubusercontent.com/manueleesposito77-HAL/proxmox-manager/main/scripts/install.sh | bash"
+pct exec 200 -- bash -c "curl -fsSL https://raw.githubusercontent.com/manueleesposito77-HAL/glu2k-proxmox-manager/main/scripts/install.sh | bash"
 ```
 
 ## Export template LXC (per distribuzione)
@@ -205,13 +205,13 @@ Se vuoi creare un `.tar.zst` riutilizzabile dopo aver installato in un container
 # Sul nodo Proxmox, dopo aver configurato il container ID 200
 pct stop 200
 vzdump 200 --mode stop --compress zstd --dumpdir /var/lib/vz/template/cache/
-# Rinomina il file in nexus-manager-v1.0.0.tar.zst
+# Rinomina il file in glu2k-manager-v1.0.0.tar.zst
 pct start 200
 ```
 
 Il file può poi essere importato su altri Proxmox:
 ```bash
-pct restore 300 /var/lib/vz/template/cache/nexus-manager-v1.0.0.tar.zst \
+pct restore 300 /var/lib/vz/template/cache/glu2k-manager-v1.0.0.tar.zst \
   --storage local-lvm --rootfs local-lvm:12
 ```
 
@@ -241,13 +241,13 @@ pct restore 300 /var/lib/vz/template/cache/nexus-manager-v1.0.0.tar.zst \
 
 ```bash
 # Logs backend
-docker logs -f nexus-api
+docker logs -f glu2k-api
 
 # Logs frontend
-docker logs -f nexus-ui
+docker logs -f glu2k-ui
 
 # DB non raggiungibile
-docker restart nexus-api nexus-db
+docker restart glu2k-api glu2k-db
 
 # Reset completo (attenzione: cancella volumi)
 docker-compose down -v

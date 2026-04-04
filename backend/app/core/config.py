@@ -4,7 +4,7 @@ from functools import lru_cache
 
 class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
-    PROJECT_NAME: str = "Nexus Proxmox Manager"
+    PROJECT_NAME: str = "Glu2k Proxmox Manager"
     
     # Database
     DATABASE_URL: str = "postgresql://nexus:securepass@localhost:5432/nexus_db"

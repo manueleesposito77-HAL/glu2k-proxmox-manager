@@ -4,7 +4,7 @@ services:
   # --- Backend Service (FastAPI) ---
   api:
     build: ./backend
-    container_name: nexus-api
+    container_name: glu2k-api
     ports:
       - "8000:8000"
     environment:
@@ -16,7 +16,7 @@ services:
       - db
       - redis
     networks:
-      - nexus-net
+      - glu2k-net
     volumes:
       - ./backend:/app
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
@@ -24,7 +24,7 @@ services:
   # --- Frontend Service (React/Vite) ---
   ui:
     build: ./frontend
-    container_name: nexus-ui
+    container_name: glu2k-ui
     ports:
       - "3000:3000" # Vite default
     environment:
@@ -32,7 +32,7 @@ services:
     depends_on:
       - api
     networks:
-      - nexus-net
+      - glu2k-net
     volumes:
       - ./frontend:/app
       - /app/node_modules
@@ -40,7 +40,7 @@ services:
   # --- Database (PostgreSQL) ---
   db:
     image: postgres:15-alpine
-    container_name: nexus-db
+    container_name: glu2k-db
     environment:
       - POSTGRES_USER=nexus
       - POSTGRES_PASSWORD=securepass
@@ -48,23 +48,23 @@ services:
     ports:
       - "5432:5432"
     networks:
-      - nexus-net
+      - glu2k-net
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
   # --- Cache (Redis) ---
   redis:
     image: redis:7-alpine
-    container_name: nexus-redis
+    container_name: glu2k-redis
     ports:
       - "6379:6379"
     networks:
-      - nexus-net
+      - glu2k-net
     volumes:
       - redis_data:/data
 
 networks:
-  nexus-net:
+  glu2k-net:
     driver: bridge
 
 volumes:

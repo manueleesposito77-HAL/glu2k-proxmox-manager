@@ -1,6 +1,6 @@
-# Nexus Proxmox Manager - Guida Operativa
+# Glu2k Proxmox Manager - Guida Operativa
 
-Questa guida ti accompagnerà nell'installazione e nella prima configurazione di **Nexus Proxmox Manager**.
+Questa guida ti accompagnerà nell'installazione e nella prima configurazione di **Glu2k Proxmox Manager**.
 
 ## 1. Prerequisiti
 Assicurati di avere installato sul tuo sistema:
@@ -63,9 +63,9 @@ Vai su `http://localhost:3000` per visualizzare la dashboard. Il frontend inizie
 ---
 
 ## Troubleshooting
-- **Logs del Backend**: `docker logs -f nexus-api`
-- **Logs del Frontend**: `docker logs -f nexus-ui`
-- **Database non raggiungibile**: Assicurati che il container `nexus-db` sia in stato "Running".
+- **Logs del Backend**: `docker logs -f glu2k-api`
+- **Logs del Frontend**: `docker logs -f glu2k-ui`
+- **Database non raggiungibile**: Assicurati che il container `glu2k-db` sia in stato "Running".
 
 ## Sviluppo Futuro
 - **Alembic**: Per gestire le migrazioni del database, entra nel container API ed esegui `alembic upgrade head`.
