@@ -1,13 +1,37 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.api.v1.cluster import router as cluster_router
-from app.database import engine, Base
+from app.api.v1.auth import router as auth_router
+from app.database import engine, Base, SessionLocal
+from app.models.user import User
+from app.models.cluster import Cluster  # import per creare tabella
+from app.core.security import hash_password
 
 settings = get_settings()
 
 # Create Tables (Automatic for Dev, use Alembic for Prod)
 Base.metadata.create_all(bind=engine)
+
+# Bootstrap admin di default
+def bootstrap_admin():
+    db: Session = SessionLocal()
+    try:
+        if db.query(User).count() == 0:
+            admin = User(
+                username="admin",
+                password_hash=hash_password("admin"),
+                role="admin",
+                is_active=True,
+            )
+            db.add(admin)
+            db.commit()
+            print("[bootstrap] Creato admin default: admin/admin (CAMBIALA!)")
+    finally:
+        db.close()
+
+bootstrap_admin()
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -29,6 +53,7 @@ app.add_middleware(
 )
 
 # Include Routers
+app.include_router(auth_router, prefix=f"{settings.API_V1_STR}/auth", tags=["auth"])
 app.include_router(cluster_router, prefix=f"{settings.API_V1_STR}/clusters", tags=["clusters"])
 
 @app.get("/")
