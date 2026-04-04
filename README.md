@@ -167,25 +167,87 @@ Apri http://localhost:3000 → login con **admin / admin** → cambia la passwor
 
 Swagger UI: http://localhost:8000/docs
 
-## Generare un API Token Proxmox
+## Generare un API Token Proxmox (passaggi dettagliati)
 
-Glu2k usa token API Proxmox (non password) per massima sicurezza.
+Glu2k **non** usa username/password del PAM, ma un **API Token** Proxmox. Questo è più sicuro: il token si può revocare in qualsiasi momento senza cambiare la password dell'utente.
 
-### Via Web UI Proxmox
-1. Datacenter → Permissions → **API Tokens** → Add
-2. User: `root@pam` (o altro)
-3. Token ID: es. `glu2k`
-4. ⚠️ **Deseleziona** "Privilege Separation" (altrimenti il token ha 0 permessi)
-5. Copia subito il **Secret** UUID (non è più visibile dopo)
+### Metodo 1 — Web UI di Proxmox (consigliato)
 
-### Via CLI (sul nodo Proxmox)
+1. **Login** alla Web UI di Proxmox (es. `https://192.168.1.10:8006`)
+2. Nel menu a sinistra clicca su **Datacenter** (la radice, non un nodo)
+3. Vai su **Permissions** → **API Tokens**
+4. Clicca il pulsante **Add** in alto
+5. Compila la form:
+   - **User**: seleziona `root@pam` (o un altro utente con permessi sufficienti)
+   - **Token ID**: un nome a tua scelta, es. `glu2k`
+   - **Privilege Separation**: ⚠️ **DESELEZIONA** questo checkbox
+     > Se lo lasci selezionato, il token viene creato con **zero permessi** e Glu2k non potrà vedere nulla. Dovresti poi assegnare manualmente i permessi al token.
+   - **Expire**: lascia vuoto per nessuna scadenza (oppure metti una data)
+   - **Comment**: opzionale
+6. Clicca **Add**
+7. **Appare una finestra modale con due campi**:
+   - **Token ID**: `root@pam!glu2k` (questo è il "full token id")
+   - **Secret**: un UUID del tipo `12345678-1234-1234-1234-123456789abc`
+8. ⚠️ **COPIA SUBITO IL SECRET IN UN POSTO SICURO**: dopo aver chiuso questa finestra **non potrai più vederlo**. Se lo perdi devi rigenerare il token.
+
+### Metodo 2 — CLI (SSH sul nodo Proxmox)
+
 ```bash
+ssh root@192.168.1.10
 pveum user token add root@pam glu2k --privsep 0
 ```
 
-### Nel form Glu2k
-- **Auth User**: `root@pam!glu2k` (full token id)
-- **Auth Token**: il secret UUID
+Output:
+```
+┌──────────────┬──────────────────────────────────────┐
+│ key          │ value                                │
+├──────────────┼──────────────────────────────────────┤
+│ full-tokenid │ root@pam!glu2k                       │
+│ value        │ 12345678-1234-1234-1234-123456789abc │
+└──────────────┴──────────────────────────────────────┘
+```
+
+- `full-tokenid` = il campo "Auth User" in Glu2k
+- `value` = il campo "Auth Token (Secret)" in Glu2k
+
+### Come usarlo in Glu2k
+
+Nella form "Aggiungi Cluster / Registra Server" di Glu2k compila:
+
+| Campo | Valore |
+|---|---|
+| Nome Cluster | nome libero, es. `Produzione` |
+| IP / Hostname | IP del nodo Proxmox, es. `192.168.1.10` (no `https://`, no `:8006`) |
+| Porta | `8006` (default) |
+| **Auth User** | `root@pam!glu2k` |
+| Auth Type | `API Token` |
+| **Auth Token** | `12345678-1234-1234-1234-123456789abc` |
+| Verify SSL | OFF *(certificati Proxmox sono self-signed di default)* |
+
+### Limitare i permessi del token (opzionale, più sicuro)
+
+Se vuoi dare permessi limitati (read-only, nessuna modifica), usa un token con privsep e assegna ruolo specifico:
+
+```bash
+# Crea utente dedicato e token con solo PVEAuditor (sola lettura)
+pveum user add glu2k@pve --password $(openssl rand -base64 16)
+pveum user token add glu2k@pve viewer --privsep 0
+pveum aclmod / --user glu2k@pve --role PVEAuditor
+```
+
+Ruoli Proxmox utili:
+- `PVEAuditor`: solo lettura
+- `PVEVMAdmin`: gestione VM completa (serve per il ruolo `operator` di Glu2k)
+- `Administrator`: accesso totale (serve per il ruolo `admin` di Glu2k)
+
+### Troubleshooting token
+
+| Errore | Causa | Soluzione |
+|---|---|---|
+| `401 invalid PVE ticket` | token scaduto o secret errato | rigenera token |
+| `403 permission denied` | privilege separation attivo o ruolo insufficiente | crea nuovo token con `--privsep 0` oppure assegna `Administrator` all'ACL |
+| `SSL: certificate verify failed` | Verify SSL attivo con cert self-signed | disattiva "Verify SSL" |
+| `connection refused` | porta sbagliata o firewall | usa porta `8006`, controlla firewall del nodo |
 
 ## Installazione manuale in container LXC su Proxmox
 
