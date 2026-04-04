@@ -173,11 +173,12 @@ const ProgressBar = ({ value, max, color = 'bg-blue-500' }) => {
   );
 };
 
-const NodeDetail = ({ cluster, nodeName, onBack }) => {
+const NodeDetail = ({ cluster, nodeName, onBack, onSelectVM }) => {
   const [status, setStatus] = useState(null);
   const [storage, setStorage] = useState([]);
   const [updates, setUpdates] = useState([]);
   const [network, setNetwork] = useState([]);
+  const [vms, setVms] = useState([]);
   const [rrd, setRrd] = useState([]);
   const [timeframe, setTimeframe] = useState('hour');
   const [loading, setLoading] = useState(true);
@@ -193,15 +194,17 @@ const NodeDetail = ({ cluster, nodeName, onBack }) => {
     if (!silent) setLoading(true);
     setError(null);
     try {
-      const [s, st, up, nw, rd] = await Promise.all([
+      const [s, st, up, nw, rd, vmsRes] = await Promise.all([
         axios.get(`${API_BASE}/clusters/${cluster.id}/nodes/${nodeName}/status`),
         axios.get(`${API_BASE}/clusters/${cluster.id}/nodes/${nodeName}/storage`),
         axios.get(`${API_BASE}/clusters/${cluster.id}/nodes/${nodeName}/updates`).catch(() => ({data: []})),
         axios.get(`${API_BASE}/clusters/${cluster.id}/nodes/${nodeName}/network`).catch(() => ({data: []})),
         axios.get(`${API_BASE}/clusters/${cluster.id}/nodes/${nodeName}/rrddata?timeframe=${timeframe}`).catch(() => ({data: []})),
+        axios.get(`${API_BASE}/clusters/${cluster.id}/vms`).catch(() => ({data: []})),
       ]);
       setStatus(s.data);
       setStorage(st.data);
+      setVms((vmsRes.data || []).filter(v => v.node === nodeName));
       setUpdates(up.data || []);
       setNetwork(nw.data || []);
       setRrd(rd.data || []);
@@ -318,6 +321,7 @@ const NodeDetail = ({ cluster, nodeName, onBack }) => {
     { id: 'charts', title: 'Metriche Storiche' },
     { id: 'storage', title: 'Storage Volumi' },
     { id: 'network', title: 'Networking' },
+    { id: 'vms', title: 'VM/CT di questo nodo' },
     { id: 'tasks', title: 'Log Tasks Nodo' },
     { id: 'fwlog', title: 'Log Firewall Nodo' },
     { id: 'updates', title: 'Aggiornamenti' },
@@ -673,6 +677,59 @@ const NodeDetail = ({ cluster, nodeName, onBack }) => {
               Le modifiche restano <strong>pending</strong> fino al click su <strong>Applica</strong>.
             </p>
           </div>
+        )}
+      </div>
+  );
+  renderers.vms = (
+      <div className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden mb-6">
+        <div className="p-4 border-b border-slate-700 font-bold flex items-center gap-2">
+          <Cpu className="w-4 h-4"/> VM/CT su {nodeName}
+          <span className="ml-2 text-xs text-slate-400 font-normal">({vms.length} totali, {vms.filter(v => v.status==='running').length} running)</span>
+        </div>
+        {vms.length === 0 ? (
+          <div className="p-4 text-sm text-slate-500">Nessuna VM/CT su questo nodo</div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-slate-900/50 text-slate-400 text-xs uppercase">
+              <tr>
+                <th className="px-4 py-2 text-left">Stato</th>
+                <th className="px-4 py-2 text-left">VMID</th>
+                <th className="px-4 py-2 text-left">Nome</th>
+                <th className="px-4 py-2 text-left">Tipo</th>
+                <th className="px-4 py-2 text-left">CPU</th>
+                <th className="px-4 py-2 text-left">RAM</th>
+                <th className="px-4 py-2 text-left">Uptime</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...vms].sort((a,b) => a.vmid - b.vmid).map(vm => {
+                const isRunning = vm.status === 'running';
+                const memPct = vm.maxmem ? Math.round((vm.mem / vm.maxmem) * 100) : 0;
+                return (
+                  <tr key={vm.id} className="border-t border-slate-700 hover:bg-slate-700/30">
+                    <td className="px-4 py-2">
+                      <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs ${isRunning ? 'bg-green-900/40 text-green-400' : 'bg-slate-700 text-slate-400'}`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${isRunning ? 'bg-green-400' : 'bg-slate-500'}`}></span>{vm.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2 font-mono text-xs text-slate-400">{vm.vmid}</td>
+                    <td className="px-4 py-2 font-medium">
+                      {onSelectVM ? (
+                        <button onClick={() => onSelectVM(vm)}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-blue-600/20 hover:bg-blue-600 text-blue-300 hover:text-white border border-blue-500/30 hover:border-blue-500 rounded text-xs font-medium transition-all">
+                          <Settings className="w-3 h-3"/>{vm.name}
+                        </button>
+                      ) : vm.name}
+                    </td>
+                    <td className="px-4 py-2 uppercase text-xs text-slate-400">{vm.type}</td>
+                    <td className="px-4 py-2 text-slate-400 text-xs">{isRunning ? `${(vm.cpu*100).toFixed(1)}%` : '-'}</td>
+                    <td className="px-4 py-2 text-slate-400 text-xs">{isRunning ? `${memPct}%` : '-'}</td>
+                    <td className="px-4 py-2 text-slate-400 text-xs">{formatUptime(vm.uptime)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         )}
       </div>
   );
@@ -2209,11 +2266,477 @@ const VMDetail = ({ cluster, vm, onBack }) => {
   );
 };
 
+const DownloadAssetModal = ({ cluster, node, kind, onClose, onDownloaded }) => {
+  // kind: 'vztmpl' | 'iso'
+  const [tab, setTab] = useState(kind === 'vztmpl' ? 'catalog' : 'url');
+  const [stores, setStores] = useState([]);
+  const [targetStore, setTargetStore] = useState('');
+  const [catalog, setCatalog] = useState([]);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [selectedTpl, setSelectedTpl] = useState('');
+  const [url, setUrl] = useState('');
+  const [filename, setFilename] = useState('');
+  const [downloading, setDownloading] = useState(false);
+  const [err, setErr] = useState(null);
+  const [msg, setMsg] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const st = await axios.get(`${API_BASE}/clusters/${cluster.id}/nodes/${node}/storage`);
+        const stores = st.data.filter(s => s.active && (s.content||'').includes(kind));
+        setStores(stores);
+        if (stores[0]) setTargetStore(stores[0].storage);
+      } catch (e) { setErr(e.response?.data?.detail || e.message); }
+    })();
+  }, [node, kind, cluster.id]);
+
+  useEffect(() => {
+    if (tab !== 'catalog' || kind !== 'vztmpl') return;
+    setCatalogLoading(true);
+    axios.get(`${API_BASE}/clusters/${cluster.id}/nodes/${node}/aplinfo`)
+      .then(r => setCatalog(r.data || []))
+      .catch(e => setErr(e.response?.data?.detail || e.message))
+      .finally(() => setCatalogLoading(false));
+  }, [tab, node, kind, cluster.id]);
+
+  const downloadCatalog = async () => {
+    setDownloading(true); setErr(null); setMsg(null);
+    try {
+      await axios.post(`${API_BASE}/clusters/${cluster.id}/nodes/${node}/aplinfo/download`, {
+        storage: targetStore, template: selectedTpl,
+      });
+      setMsg('Download avviato! Può richiedere minuti. Ricarica la lista template quando finisce.');
+      setTimeout(() => { onDownloaded(); }, 3000);
+    } catch (e) { setErr(e.response?.data?.detail || e.message); }
+    finally { setDownloading(false); }
+  };
+
+  const downloadUrl = async () => {
+    setDownloading(true); setErr(null); setMsg(null);
+    try {
+      await axios.post(`${API_BASE}/clusters/${cluster.id}/nodes/${node}/storage/${targetStore}/download-url`, {
+        url, filename, content: kind,
+      });
+      setMsg('Download avviato! Ricarica la lista quando finisce.');
+      setTimeout(() => { onDownloaded(); }, 3000);
+    } catch (e) { setErr(e.response?.data?.detail || e.message); }
+    finally { setDownloading(false); }
+  };
+
+  // Auto-fill filename from URL
+  useEffect(() => {
+    if (!filename && url) {
+      const name = url.split('/').pop().split('?')[0];
+      if (name) setFilename(name);
+    }
+  }, [url]);
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+      <div className="bg-slate-800 w-full max-w-3xl rounded-xl border border-slate-700 overflow-hidden max-h-[85vh] flex flex-col">
+        <div className="flex justify-between items-center p-4 border-b border-slate-700">
+          <h3 className="text-lg font-bold flex items-center gap-2">
+            <Download className="w-5 h-5 text-blue-400"/>
+            Scarica {kind === 'vztmpl' ? 'Template LXC' : 'ISO'} su {node}
+          </h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-white"><X className="w-5 h-5"/></button>
+        </div>
+
+        {kind === 'vztmpl' && (
+          <div className="flex gap-1 px-4 pt-3">
+            <button onClick={() => setTab('catalog')} className={`px-3 py-1.5 rounded text-xs font-medium ${tab==='catalog'?'bg-blue-600 text-white':'bg-slate-700 text-slate-300'}`}>Catalogo Proxmox/TurnKey</button>
+            <button onClick={() => setTab('url')} className={`px-3 py-1.5 rounded text-xs font-medium ${tab==='url'?'bg-blue-600 text-white':'bg-slate-700 text-slate-300'}`}>Da URL</button>
+          </div>
+        )}
+
+        <div className="p-4 overflow-y-auto space-y-3">
+          <div>
+            <label className="text-xs text-slate-400 block mb-1">Storage di destinazione *</label>
+            <select value={targetStore} onChange={e => setTargetStore(e.target.value)}
+              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm">
+              {stores.map(s => <option key={s.storage} value={s.storage}>{s.storage} ({s.type})</option>)}
+            </select>
+            {stores.length === 0 && <p className="text-xs text-yellow-400 mt-1">Nessuno storage supporta contenuto "{kind}"</p>}
+          </div>
+
+          {tab === 'catalog' && kind === 'vztmpl' && (
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">Template</label>
+              {catalogLoading ? (
+                <div className="text-sm text-slate-400 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin"/> Caricamento catalogo...</div>
+              ) : (
+                <div className="max-h-80 overflow-y-auto border border-slate-700 rounded-lg">
+                  <table className="w-full text-xs">
+                    <thead className="bg-slate-900 sticky top-0">
+                      <tr>
+                        <th className="px-3 py-2 text-left">Sezione</th>
+                        <th className="px-3 py-2 text-left">Template</th>
+                        <th className="px-3 py-2 text-left">OS</th>
+                        <th className="px-3 py-2 text-left">Size</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {catalog.map(t => (
+                        <tr key={t.template} onClick={() => setSelectedTpl(t.template)}
+                          className={`border-t border-slate-700 cursor-pointer hover:bg-slate-700/30 ${selectedTpl === t.template ? 'bg-blue-900/30' : ''}`}>
+                          <td className="px-3 py-1.5"><span className={`text-[10px] uppercase px-1.5 py-0.5 rounded ${t.section==='turnkeylinux'?'bg-purple-900/40 text-purple-300':'bg-slate-700 text-slate-300'}`}>{t.section}</span></td>
+                          <td className="px-3 py-1.5 font-mono">{t.template}</td>
+                          <td className="px-3 py-1.5 text-slate-400">{t.os || '-'}</td>
+                          <td className="px-3 py-1.5 text-slate-400">{t.infopage ? '' : (t.headline||'').slice(0,30)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <button onClick={downloadCatalog} disabled={!selectedTpl || !targetStore || downloading}
+                className="mt-3 w-full flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-lg text-sm font-medium">
+                {downloading ? <Loader2 className="w-4 h-4 animate-spin"/> : <Download className="w-4 h-4"/>}
+                Scarica template
+              </button>
+            </div>
+          )}
+
+          {tab === 'url' && (
+            <>
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">URL *</label>
+                <input type="url" value={url} onChange={e => setUrl(e.target.value)}
+                  placeholder="https://releases.ubuntu.com/24.04/ubuntu-24.04-desktop-amd64.iso"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm font-mono"/>
+              </div>
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Nome file *</label>
+                <input type="text" value={filename} onChange={e => setFilename(e.target.value)}
+                  placeholder={kind==='iso'?'ubuntu-24.04.iso':'debian-12.tar.zst'}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm font-mono"/>
+              </div>
+              <button onClick={downloadUrl} disabled={!url || !filename || !targetStore || downloading}
+                className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-lg text-sm font-medium">
+                {downloading ? <Loader2 className="w-4 h-4 animate-spin"/> : <Download className="w-4 h-4"/>}
+                Avvia download
+              </button>
+            </>
+          )}
+
+          {err && <div className="p-2 bg-red-900/30 border border-red-700 rounded text-red-300 text-xs">{err}</div>}
+          {msg && <div className="p-2 bg-green-900/30 border border-green-700 rounded text-green-300 text-xs">{msg}</div>}
+        </div>
+
+        <div className="p-3 border-t border-slate-700 flex justify-between items-center">
+          <span className="text-xs text-slate-500">Il download gira in background sul nodo Proxmox</span>
+          <button onClick={onClose} className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded text-sm">Chiudi</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const CreateVmModal = ({ cluster, nodes, onClose, onCreated }) => {
+  const [kind, setKind] = useState('lxc');
+  const [node, setNode] = useState(nodes.find(n => n.status==='online')?.node || '');
+  const [vmid, setVmid] = useState('');
+  const [storages, setStorages] = useState([]);
+  const [templates, setTemplates] = useState([]);
+  const [isos, setIsos] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+  const [showDownload, setShowDownload] = useState(false);
+  const [reloadTick, setReloadTick] = useState(0);
+  const [form, setForm] = useState({
+    hostname: '', name: '', password: '', ostemplate: '', iso: '',
+    cores: 1, memory: 512, swap: 512,
+    storage: '', diskSize: 8,
+    bridge: 'vmbr0', ip: 'dhcp', gateway: '',
+    ostype: 'l26', cpu: 'host', start: 0,
+  });
+
+  useEffect(() => {
+    if (!node) return;
+    (async () => {
+      try {
+        const [nv, st] = await Promise.all([
+          axios.get(`${API_BASE}/clusters/${cluster.id}/next_vmid`),
+          axios.get(`${API_BASE}/clusters/${cluster.id}/nodes/${node}/storage`),
+        ]);
+        setVmid(nv.data.vmid);
+        setStorages(st.data.filter(s => s.active && ((s.content||'').includes('images') || (s.content||'').includes('rootdir'))));
+        const desired = kind === 'lxc' ? 'rootdir' : 'images';
+        const def = st.data.find(s => s.active && (s.content||'').includes(desired));
+        if (def) setForm(f => ({...f, storage: def.storage}));
+      } catch (err) { setError(err.response?.data?.detail || err.message); }
+    })();
+  }, [node, kind, cluster.id]);
+
+  useEffect(() => {
+    if (!node) return;
+    (async () => {
+      setLoading(true);
+      try {
+        const st = await axios.get(`${API_BASE}/clusters/${cluster.id}/nodes/${node}/storage`);
+        const wanted = kind === 'lxc' ? 'vztmpl' : 'iso';
+        const stores = st.data.filter(s => s.active && (s.content||'').includes(wanted));
+        const all = [];
+        for (const s of stores) {
+          try {
+            const c = await axios.get(`${API_BASE}/clusters/${cluster.id}/nodes/${node}/storage/${s.storage}/content?content_type=${wanted}`);
+            all.push(...c.data);
+          } catch {}
+        }
+        if (kind === 'lxc') setTemplates(all); else setIsos(all);
+      } catch {} finally { setLoading(false); }
+    })();
+  }, [node, kind, cluster.id, reloadTick]);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      if (kind === 'lxc') {
+        const payload = {
+          vmid: Number(vmid),
+          hostname: form.hostname,
+          ostemplate: form.ostemplate,
+          rootfs: `${form.storage}:${form.diskSize}`,
+          cores: Number(form.cores),
+          memory: Number(form.memory),
+          swap: Number(form.swap),
+          net0: `name=eth0,bridge=${form.bridge},ip=${form.ip || 'dhcp'}${form.gateway && form.ip !== 'dhcp' ? ',gw='+form.gateway : ''}`,
+          unprivileged: 1,
+          features: 'nesting=1',
+          start: form.start,
+        };
+        if (form.password) payload.password = form.password;
+        await axios.post(`${API_BASE}/clusters/${cluster.id}/nodes/${node}/lxc/create`, payload);
+      } else {
+        const payload = {
+          vmid: Number(vmid),
+          name: form.name,
+          cores: Number(form.cores),
+          memory: Number(form.memory),
+          scsihw: 'virtio-scsi-pci',
+          scsi0: `${form.storage}:${form.diskSize}`,
+          net0: `virtio,bridge=${form.bridge}`,
+          ostype: form.ostype,
+          cpu: form.cpu,
+          boot: 'order=ide2;scsi0;net0',
+          start: form.start,
+        };
+        if (form.iso) payload.ide2 = `${form.iso},media=cdrom`;
+        await axios.post(`${API_BASE}/clusters/${cluster.id}/nodes/${node}/qemu/create`, payload);
+      }
+      onCreated();
+      onClose();
+    } catch (err) {
+      setError(err.response?.data?.detail || err.message);
+    } finally { setSubmitting(false); }
+  };
+
+  const onlineNodes = nodes.filter(n => n.status === 'online');
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+      <div className="bg-slate-800 w-full max-w-2xl rounded-xl border border-slate-700 overflow-hidden max-h-[90vh] flex flex-col">
+        <div className="flex justify-between items-center p-5 border-b border-slate-700">
+          <h3 className="text-xl font-bold flex items-center gap-2">
+            <Plus className="w-5 h-5 text-blue-400"/> Crea nuova {kind === 'lxc' ? 'LXC Container' : 'VM QEMU'}
+          </h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-white"><X className="w-6 h-6"/></button>
+        </div>
+
+        <div className="flex gap-2 px-5 pt-4">
+          <button onClick={() => setKind('lxc')} className={`flex-1 py-2 rounded-lg text-sm font-medium ${kind==='lxc' ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>
+            LXC Container
+          </button>
+          <button onClick={() => setKind('qemu')} className={`flex-1 py-2 rounded-lg text-sm font-medium ${kind==='qemu' ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>
+            VM QEMU
+          </button>
+        </div>
+
+        <form onSubmit={submit} className="p-5 space-y-4 overflow-y-auto">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">Nodo *</label>
+              <select required value={node} onChange={e => setNode(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm">
+                {onlineNodes.map(n => <option key={n.node} value={n.node}>{n.node}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">VMID *</label>
+              <input required type="number" value={vmid} onChange={e => setVmid(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm font-mono"/>
+            </div>
+          </div>
+
+          {kind === 'lxc' ? (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-slate-400 block mb-1">Hostname *</label>
+                  <input required type="text" value={form.hostname} onChange={e => setForm({...form, hostname: e.target.value})}
+                    placeholder="nome-container"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm"/>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400 block mb-1">Password root *</label>
+                  <input required type="password" value={form.password} onChange={e => setForm({...form, password: e.target.value})}
+                    minLength="5"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm"/>
+                </div>
+              </div>
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs text-slate-400">Template OS *</label>
+                  <button type="button" onClick={() => setShowDownload(true)} className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300">
+                    <Download className="w-3 h-3"/> Scarica nuovo template
+                  </button>
+                </div>
+                <select required value={form.ostemplate} onChange={e => setForm({...form, ostemplate: e.target.value})}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm">
+                  <option value="">-- seleziona --</option>
+                  {templates.map(t => <option key={t.volid} value={t.volid}>{t.volid.split('/').pop()}</option>)}
+                </select>
+                {templates.length === 0 && !loading && <p className="text-xs text-yellow-400 mt-1">Nessun template. Clicca "Scarica nuovo template" per aggiungerne uno dal catalogo Proxmox/TurnKey.</p>}
+              </div>
+            </>
+          ) : (
+            <>
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Nome VM *</label>
+                <input required type="text" value={form.name} onChange={e => setForm({...form, name: e.target.value})}
+                  placeholder="nome-vm"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm"/>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs text-slate-400">ISO boot (opz.)</label>
+                    <button type="button" onClick={() => setShowDownload(true)} className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300">
+                      <Download className="w-3 h-3"/> Scarica ISO
+                    </button>
+                  </div>
+                  <select value={form.iso} onChange={e => setForm({...form, iso: e.target.value})}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm">
+                    <option value="">-- nessuno --</option>
+                    {isos.map(i => <option key={i.volid} value={i.volid}>{i.volid.split('/').pop()}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400 block mb-1">OS Type</label>
+                  <select value={form.ostype} onChange={e => setForm({...form, ostype: e.target.value})}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm">
+                    <option value="l26">Linux 2.6+</option>
+                    <option value="win11">Windows 11/2022</option>
+                    <option value="win10">Windows 10/2016/2019</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+              </div>
+            </>
+          )}
+
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">CPU cores</label>
+              <input type="number" min="1" value={form.cores} onChange={e => setForm({...form, cores: e.target.value})}
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm"/>
+            </div>
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">RAM (MB)</label>
+              <input type="number" min="128" step="128" value={form.memory} onChange={e => setForm({...form, memory: e.target.value})}
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm"/>
+            </div>
+            {kind === 'lxc' && (
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Swap (MB)</label>
+                <input type="number" min="0" value={form.swap} onChange={e => setForm({...form, swap: e.target.value})}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm"/>
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">Storage {kind==='lxc'?'rootfs':'disco'} *</label>
+              <select required value={form.storage} onChange={e => setForm({...form, storage: e.target.value})}
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm">
+                <option value="">-- seleziona --</option>
+                {storages.map(s => <option key={s.storage} value={s.storage}>{s.storage} ({s.type})</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">Dimensione disco (GB) *</label>
+              <input required type="number" min="1" value={form.diskSize} onChange={e => setForm({...form, diskSize: e.target.value})}
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm"/>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">Bridge</label>
+              <input type="text" value={form.bridge} onChange={e => setForm({...form, bridge: e.target.value})}
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm font-mono"/>
+            </div>
+            {kind === 'lxc' && (
+              <>
+                <div>
+                  <label className="text-xs text-slate-400 block mb-1">IP</label>
+                  <input type="text" value={form.ip} onChange={e => setForm({...form, ip: e.target.value})}
+                    placeholder="dhcp o 10.0.0.10/24"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm font-mono"/>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400 block mb-1">Gateway</label>
+                  <input type="text" value={form.gateway} onChange={e => setForm({...form, gateway: e.target.value})}
+                    placeholder="10.0.0.1"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm font-mono"/>
+                </div>
+              </>
+            )}
+          </div>
+
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={!!form.start} onChange={e => setForm({...form, start: e.target.checked ? 1 : 0})}/>
+            Avvia dopo la creazione
+          </label>
+
+          {error && (
+            <div className="p-3 bg-red-900/30 border border-red-700 rounded text-red-300 text-sm">{error}</div>
+          )}
+
+          <div className="flex justify-end gap-2 pt-2 border-t border-slate-700">
+            <button type="button" onClick={onClose} className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm">Annulla</button>
+            <button type="submit" disabled={submitting}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-lg text-sm font-medium">
+              {submitting ? <Loader2 className="w-4 h-4 animate-spin"/> : <Plus className="w-4 h-4"/>}
+              Crea {kind === 'lxc' ? 'Container' : 'VM'}
+            </button>
+          </div>
+        </form>
+      </div>
+      {showDownload && (
+        <DownloadAssetModal
+          cluster={cluster}
+          node={node}
+          kind={kind === 'lxc' ? 'vztmpl' : 'iso'}
+          onClose={() => setShowDownload(false)}
+          onDownloaded={() => setReloadTick(t => t+1)}
+        />
+      )}
+    </div>
+  );
+};
+
 const ClusterDetail = ({ cluster, onSelectNode, onSelectVM }) => {
   const [vms, setVms] = useState([]);
   const [nodes, setNodes] = useState([]);
   const [rrdAgg, setRrdAgg] = useState([]);
   const [clusterStorage, setClusterStorage] = useState([]);
+  const [showCreateVm, setShowCreateVm] = useState(false);
   const [timeframe, setTimeframe] = useState('hour');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -2420,9 +2943,14 @@ const ClusterDetail = ({ cluster, onSelectNode, onSelectVM }) => {
       <div className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden" id="section-vms">
         <div className="flex justify-between items-center p-4 border-b border-slate-700">
           <h3 className="font-bold text-lg">VM e Container</h3>
-          <button onClick={fetchData} className="text-slate-400 hover:text-white p-2 rounded-lg hover:bg-slate-700">
-            <RefreshCw className="w-4 h-4"/>
-          </button>
+          <div className="flex gap-2">
+            <button onClick={() => setShowCreateVm(true)} className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-medium">
+              <Plus className="w-4 h-4"/> Crea VM/CT
+            </button>
+            <button onClick={fetchData} className="text-slate-400 hover:text-white p-2 rounded-lg hover:bg-slate-700">
+              <RefreshCw className="w-4 h-4"/>
+            </button>
+          </div>
         </div>
         <table className="w-full text-sm">
           <thead className="bg-slate-900/50 text-slate-400 text-xs uppercase">
@@ -2511,6 +3039,9 @@ const ClusterDetail = ({ cluster, onSelectNode, onSelectVM }) => {
     <div>
       <SectionManager sections={sections} meta={sectionMeta} onToggle={toggle} onMove={move} onReset={reset}/>
       {sections.filter(s => s.visible).map(s => <React.Fragment key={s.id}>{renderers[s.id]}</React.Fragment>)}
+      {showCreateVm && (
+        <CreateVmModal cluster={cluster} nodes={nodes} onClose={() => setShowCreateVm(false)} onCreated={fetchData}/>
+      )}
     </div>
   );
 };
@@ -2741,7 +3272,7 @@ function MainApp({ currentUser, onLogout, showUsers, setShowUsers }) {
         {selectedCluster && selectedVM ? (
           <VMDetail cluster={selectedCluster} vm={selectedVM} onBack={() => setSelectedVM(null)} key={`${selectedVM.node}-${selectedVM.vmid}`} />
         ) : selectedCluster && selectedNode ? (
-          <NodeDetail cluster={selectedCluster} nodeName={selectedNode} onBack={() => setSelectedNode(null)} key={selectedNode} />
+          <NodeDetail cluster={selectedCluster} nodeName={selectedNode} onBack={() => setSelectedNode(null)} onSelectVM={setSelectedVM} key={selectedNode} />
         ) : selectedCluster ? (
           <ClusterDetail cluster={selectedCluster} onSelectNode={setSelectedNode} onSelectVM={setSelectedVM} key={selectedCluster.id} />
         ) : clusters.length === 0 ? (

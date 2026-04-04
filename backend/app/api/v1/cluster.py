@@ -104,6 +104,99 @@ def node_status(cluster_id: int, node: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=502, detail=str(e))
 
 
+@router.get("/{cluster_id}/nodes/{node}/storage/{storage}/content")
+def node_storage_content(cluster_id: int, node: str, storage: str, content_type: str = None, db: Session = Depends(get_db)):
+    """Lista contenuto di uno storage (iso, vztmpl, images, rootdir, backup)."""
+    cluster = _get_cluster_or_404(cluster_id, db)
+    try:
+        svc = ProxmoxService(cluster)
+        kwargs = {}
+        if content_type:
+            kwargs["content"] = content_type
+        return svc.proxmox.nodes(node).storage(storage).content.get(**kwargs)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.post("/{cluster_id}/nodes/{node}/qemu/create", dependencies=[Depends(require_operator_or_admin)])
+def create_qemu_vm(cluster_id: int, node: str, payload: dict, db: Session = Depends(get_db)):
+    """Crea una nuova VM QEMU."""
+    cluster = _get_cluster_or_404(cluster_id, db)
+    try:
+        svc = ProxmoxService(cluster)
+        clean = {k: v for k, v in payload.items() if v is not None and v != ""}
+        task = svc.proxmox.nodes(node).qemu.create(**clean)
+        return {"status": "ok", "task_id": task}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.post("/{cluster_id}/nodes/{node}/lxc/create", dependencies=[Depends(require_operator_or_admin)])
+def create_lxc_ct(cluster_id: int, node: str, payload: dict, db: Session = Depends(get_db)):
+    """Crea un nuovo LXC container."""
+    cluster = _get_cluster_or_404(cluster_id, db)
+    try:
+        svc = ProxmoxService(cluster)
+        clean = {k: v for k, v in payload.items() if v is not None and v != ""}
+        task = svc.proxmox.nodes(node).lxc.create(**clean)
+        return {"status": "ok", "task_id": task}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get("/{cluster_id}/nodes/{node}/aplinfo")
+def node_aplinfo(cluster_id: int, node: str, db: Session = Depends(get_db)):
+    """Catalogo template disponibili (Proxmox + TurnKey)."""
+    cluster = _get_cluster_or_404(cluster_id, db)
+    try:
+        svc = ProxmoxService(cluster)
+        return svc.proxmox.nodes(node).aplinfo.get()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.post("/{cluster_id}/nodes/{node}/aplinfo/download", dependencies=[Depends(require_admin)])
+def node_aplinfo_download(cluster_id: int, node: str, payload: dict, db: Session = Depends(get_db)):
+    """Scarica un template dal catalogo Proxmox/TurnKey. payload: {storage, template}"""
+    cluster = _get_cluster_or_404(cluster_id, db)
+    try:
+        svc = ProxmoxService(cluster)
+        task = svc.proxmox.nodes(node).aplinfo.post(storage=payload["storage"], template=payload["template"])
+        return {"status": "ok", "task_id": task}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.post("/{cluster_id}/nodes/{node}/storage/{storage}/download-url", dependencies=[Depends(require_admin)])
+def storage_download_url(cluster_id: int, node: str, storage: str, payload: dict, db: Session = Depends(get_db)):
+    """Scarica un file (iso/vztmpl) da URL dentro uno storage. payload: {url, filename, content}"""
+    cluster = _get_cluster_or_404(cluster_id, db)
+    try:
+        svc = ProxmoxService(cluster)
+        kwargs = {
+            "url": payload["url"],
+            "filename": payload["filename"],
+            "content": payload.get("content", "iso"),
+        }
+        if payload.get("checksum"):
+            kwargs["checksum"] = payload["checksum"]
+            kwargs["checksum-algorithm"] = payload.get("checksum_algo", "sha256")
+        task = svc.proxmox.nodes(node).storage(storage)("download-url").post(**kwargs)
+        return {"status": "ok", "task_id": task}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get("/{cluster_id}/next_vmid")
+def next_vmid(cluster_id: int, db: Session = Depends(get_db)):
+    cluster = _get_cluster_or_404(cluster_id, db)
+    try:
+        svc = ProxmoxService(cluster)
+        return {"vmid": svc.proxmox.cluster.nextid.get()}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
 @router.get("/{cluster_id}/nodes/{node}/storage")
 def node_storage(cluster_id: int, node: str, db: Session = Depends(get_db)):
     cluster = _get_cluster_or_404(cluster_id, db)

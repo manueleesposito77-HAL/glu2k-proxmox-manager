@@ -74,9 +74,20 @@ CT_ID=200 HOSTNAME=glu2k MEMORY=4096 DISK_SIZE=16 STORAGE=local-zfs BRIDGE=vmbr0
 - Grafici storici: CPU, RAM, rete, load average (hour/day/week/month/year)
 - Tabella storage volumi con uso, tipo, contenuto, stato
 - **Networking**: bridge/bond/VLAN create, modifica, elimina + apply/revert pending
+- **Lista VM/CT ospitate** sul nodo con link diretto al detail
 - Log firewall nodo con filtri (DROP/ACCEPT/REJECT) + ricerca
 - Aggiornamenti APT disponibili + refresh lista
 - Log tasks nodo
+
+### Wizard creazione VM/CT
+- Pulsante **"+ Crea VM/CT"** nella vista cluster
+- Tab dedicate per **LXC Container** e **VM QEMU**
+- Form completo: nodo, VMID (auto-calcolato), hostname/nome, password, cores, RAM, swap, storage, disco, bridge, IP, gateway
+- Selezione **template/ISO** da qualunque storage del nodo
+- Pulsante **"Scarica nuovo template/ISO"** che apre sotto-modal con:
+  - **Catalogo Proxmox + TurnKey Linux** (lista sfogliabile, badge colorati)
+  - **Download da URL** (es. Ubuntu/Debian ISO, auto-detect filename)
+- Opzione "Avvia dopo la creazione"
 
 ### Gestione VM / Container
 - Stato running + risorse live (CPU%, RAM, disco, rete I/O)
