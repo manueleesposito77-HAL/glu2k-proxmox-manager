@@ -13,8 +13,11 @@ services:
       - SECRET_KEY=change_this_in_production_super_secret_key
       - ENCRYPTION_KEY=D7pZhH9y2W3k4L5m6N7o8P9qR0sT1uV2wX3yZ4a5b6c= # Example Fernet Key
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
     networks:
       - glu2k-net
     volumes:
@@ -51,6 +54,12 @@ services:
       - glu2k-net
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nexus -d nexus_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
 
   # --- Cache (Redis) ---
   redis:

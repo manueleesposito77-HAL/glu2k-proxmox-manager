@@ -1945,6 +1945,7 @@ const VMDetail = ({ cluster, vm, onBack }) => {
     { id: 'fwlog', title: 'Log Firewall VM' },
     { id: 'network', title: 'Interfacce di Rete VM' },
     { id: 'disks', title: 'Dischi / Volumi' },
+    { id: 'backups', title: 'Backup' },
     { id: 'tasks', title: 'Log Tasks VM' },
     { id: 'raw', title: 'Config raw' },
   ];
@@ -2249,6 +2250,10 @@ const VMDetail = ({ cluster, vm, onBack }) => {
         <div style={{order: vmOrder('network')}}><VMNetworkSection cluster={cluster} vm={vm} vtype={vtype} config={config} netKeys={netKeys} onChange={fetchData}/></div>
       )}
 
+      {vmIsVisible('backups') && (
+        <div style={{order: vmOrder('backups')}}><BackupsSection cluster={cluster} vm={vm}/></div>
+      )}
+
       {vmIsVisible('tasks') && (
         <div style={{order: vmOrder('tasks')}}><TasksSection tasksUrl={`${API_BASE}/clusters/${cluster.id}/nodes/${vm.node}/tasks?limit=30&vmid=${vm.vmid}`} cluster={cluster} title={`Log Tasks VM #${vm.vmid}`}/></div>
       )}
@@ -2429,6 +2434,181 @@ const DownloadAssetModal = ({ cluster, node, kind, onClose, onDownloaded }) => {
           <button onClick={onClose} className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded text-sm">Chiudi</button>
         </div>
       </div>
+    </div>
+  );
+};
+
+const BackupsSection = ({ cluster, vm }) => {
+  const [backups, setBackups] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [storages, setStorages] = useState([]);
+  const [showCreate, setShowCreate] = useState(false);
+  const [form, setForm] = useState({ storage: '', mode: 'snapshot', compress: 'zstd', notes: '', remove: 0 });
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      const [b, s] = await Promise.all([
+        axios.get(`${API_BASE}/clusters/${cluster.id}/nodes/${vm.node}/backups?vmid=${vm.vmid}`),
+        axios.get(`${API_BASE}/clusters/${cluster.id}/nodes/${vm.node}/storage`),
+      ]);
+      setBackups(b.data || []);
+      const backupStores = (s.data || []).filter(x => x.active && (x.content||'').includes('backup'));
+      setStorages(backupStores);
+      if (backupStores[0] && !form.storage) setForm(f => ({...f, storage: backupStores[0].storage}));
+    } catch (err) { console.error(err); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { fetchData(); }, [vm.vmid, vm.node]);
+
+  const createBackup = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      await axios.post(`${API_BASE}/clusters/${cluster.id}/vms/${vm.node}/${vm.vmid}/backup`, form);
+      setMsg({type:'ok', text:'Backup avviato in background. Controlla il Log Tasks.'});
+      setShowCreate(false);
+      setTimeout(fetchData, 5000);
+    } catch (err) { setMsg({type:'err', text: err.response?.data?.detail || err.message}); }
+    finally { setBusy(false); }
+  };
+
+  const delBackup = async (b) => {
+    if (!confirm(`Eliminare backup ${b.volid}?`)) return;
+    try {
+      await axios.delete(`${API_BASE}/clusters/${cluster.id}/nodes/${vm.node}/backups?volid=${encodeURIComponent(b.volid)}`);
+      fetchData();
+    } catch (err) { alert(err.response?.data?.detail || err.message); }
+  };
+
+  const restoreBackup = async (b) => {
+    const newVmid = prompt(`Ripristina in un nuovo ${vm.type === 'lxc' ? 'container' : 'VM'}. Inserisci VMID (vuoto = sovrascrivi #${vm.vmid}):`, '');
+    const force = newVmid === '' || newVmid === null;
+    const targetVmid = force ? vm.vmid : parseInt(newVmid);
+    if (!targetVmid) return;
+    if (force && !confirm(`ATTENZIONE: sovrascrivere la VM/CT ${vm.vmid} con questo backup? Operazione irreversibile!`)) return;
+    try {
+      await axios.post(`${API_BASE}/clusters/${cluster.id}/nodes/${vm.node}/restore`, {
+        vmid: targetVmid, volid: b.volid, type: vm.type, force: force ? 1 : 0,
+      });
+      setMsg({type:'ok', text:'Restore avviato. Controlla il Log Tasks.'});
+    } catch (err) { alert(err.response?.data?.detail || err.message); }
+  };
+
+  const fmtTime = (ts) => ts ? new Date(ts*1000).toLocaleString() : '-';
+  const fmtBytes = (b) => b ? formatBytes(b) : '-';
+
+  return (
+    <div className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden mb-6">
+      <div className="p-4 border-b border-slate-700 flex items-center justify-between">
+        <div className="font-bold flex items-center gap-2"><Database className="w-4 h-4"/> Backup ({backups.length})</div>
+        <div className="flex gap-2">
+          <button onClick={fetchData} className="p-1.5 rounded hover:bg-slate-700 text-slate-400"><RefreshCw className="w-4 h-4"/></button>
+          <button onClick={() => setShowCreate(true)} disabled={storages.length === 0}
+            className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-xs">
+            <Plus className="w-3.5 h-3.5"/> Nuovo Backup
+          </button>
+        </div>
+      </div>
+
+      {msg && <div className={`px-4 py-2 text-xs border-b border-slate-700 ${msg.type==='ok'?'bg-green-900/20 text-green-300':'bg-red-900/20 text-red-300'}`}>{msg.text}</div>}
+
+      {showCreate && (
+        <div className="p-4 border-b border-slate-700 bg-slate-900/30">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">Storage</label>
+              <select value={form.storage} onChange={e => setForm({...form, storage: e.target.value})}
+                className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs">
+                {storages.map(s => <option key={s.storage} value={s.storage}>{s.storage}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">Modalità</label>
+              <select value={form.mode} onChange={e => setForm({...form, mode: e.target.value})}
+                className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs">
+                <option value="snapshot">Snapshot (no downtime)</option>
+                <option value="suspend">Suspend</option>
+                <option value="stop">Stop</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">Compressione</label>
+              <select value={form.compress} onChange={e => setForm({...form, compress: e.target.value})}
+                className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs">
+                <option value="zstd">zstd (veloce)</option>
+                <option value="lzo">lzo</option>
+                <option value="gzip">gzip (piccolo)</option>
+                <option value="0">nessuna</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">Prune vecchi</label>
+              <select value={form.remove} onChange={e => setForm({...form, remove: parseInt(e.target.value)})}
+                className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs">
+                <option value="0">no</option>
+                <option value="1">sì (policy storage)</option>
+              </select>
+            </div>
+          </div>
+          <div className="mb-3">
+            <label className="text-xs text-slate-400 block mb-1">Note</label>
+            <input type="text" value={form.notes} onChange={e => setForm({...form, notes: e.target.value})}
+              placeholder="Descrizione backup..." className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs"/>
+          </div>
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setShowCreate(false)} className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded text-xs">Annulla</button>
+            <button onClick={createBackup} disabled={busy || !form.storage}
+              className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-xs">
+              {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin"/> : <Database className="w-3.5 h-3.5"/>}
+              Crea Backup
+            </button>
+          </div>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="p-4 text-slate-400 text-sm">Caricamento...</div>
+      ) : backups.length === 0 ? (
+        <div className="p-6 text-center text-slate-500 text-sm">Nessun backup disponibile</div>
+      ) : (
+        <table className="w-full text-xs">
+          <thead className="bg-slate-900/50 text-slate-400 uppercase">
+            <tr>
+              <th className="px-3 py-2 text-left">Data</th>
+              <th className="px-3 py-2 text-left">Storage</th>
+              <th className="px-3 py-2 text-left">File</th>
+              <th className="px-3 py-2 text-left">Size</th>
+              <th className="px-3 py-2 text-left">Note</th>
+              <th className="px-3 py-2 text-right">Azioni</th>
+            </tr>
+          </thead>
+          <tbody>
+            {backups.map(b => (
+              <tr key={b.volid} className="border-t border-slate-700 hover:bg-slate-700/30">
+                <td className="px-3 py-2 text-slate-300">{fmtTime(b.ctime)}</td>
+                <td className="px-3 py-2 font-mono text-slate-400">{b._storage}</td>
+                <td className="px-3 py-2 font-mono text-slate-400 truncate max-w-[200px]" title={b.volid}>{b.volid.split('/').pop()}</td>
+                <td className="px-3 py-2 text-slate-400">{fmtBytes(b.size)}</td>
+                <td className="px-3 py-2 text-slate-500 truncate max-w-[160px]" title={b.notes}>{b.notes || '-'}</td>
+                <td className="px-3 py-2 text-right">
+                  <div className="flex gap-1 justify-end">
+                    <button onClick={() => restoreBackup(b)} title="Ripristina"
+                      className="inline-flex items-center gap-1 px-2 py-0.5 bg-green-600/20 hover:bg-green-600 text-green-300 hover:text-white border border-green-500/30 rounded text-xs">
+                      <RefreshCw className="w-3 h-3"/> Restore
+                    </button>
+                    <button onClick={() => delBackup(b)} title="Elimina"
+                      className="inline-flex items-center gap-1 px-2 py-0.5 bg-red-600/20 hover:bg-red-600 text-red-300 hover:text-white border border-red-500/30 rounded text-xs">
+                      <Trash2 className="w-3 h-3"/>
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 };

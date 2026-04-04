@@ -187,6 +187,104 @@ def storage_download_url(cluster_id: int, node: str, storage: str, payload: dict
         raise HTTPException(status_code=502, detail=str(e))
 
 
+@router.get("/{cluster_id}/nodes/{node}/backups")
+def node_backups(cluster_id: int, node: str, storage: str = None, vmid: int = None, db: Session = Depends(get_db)):
+    """Lista backup del nodo (tutti gli storage o filtrati)."""
+    cluster = _get_cluster_or_404(cluster_id, db)
+    try:
+        svc = ProxmoxService(cluster)
+        if storage:
+            stores = [storage]
+        else:
+            st = svc.proxmox.nodes(node).storage.get()
+            stores = [s["storage"] for s in st if s.get("active") and "backup" in (s.get("content") or "")]
+        results = []
+        for s in stores:
+            try:
+                content = svc.proxmox.nodes(node).storage(s).content.get(content="backup")
+                for c in content:
+                    c["_storage"] = s
+                    if vmid is None or c.get("vmid") == vmid:
+                        results.append(c)
+            except Exception:
+                continue
+        results.sort(key=lambda x: x.get("ctime", 0), reverse=True)
+        return results
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.post("/{cluster_id}/vms/{node}/{vmid}/backup", dependencies=[Depends(require_operator_or_admin)])
+def vm_create_backup(cluster_id: int, node: str, vmid: int, payload: dict, db: Session = Depends(get_db)):
+    """Crea backup on-demand di una VM/CT.
+    payload: {storage, mode (snapshot/suspend/stop), compress (zstd/lzo/gzip), notes, remove(0/1), mailto}"""
+    cluster = _get_cluster_or_404(cluster_id, db)
+    try:
+        svc = ProxmoxService(cluster)
+        kwargs = {
+            "vmid": vmid,
+            "storage": payload["storage"],
+            "mode": payload.get("mode", "snapshot"),
+            "compress": payload.get("compress", "zstd"),
+            "remove": payload.get("remove", 0),
+        }
+        if payload.get("notes"):
+            kwargs["notes-template"] = payload["notes"]
+        if payload.get("mailto"):
+            kwargs["mailto"] = payload["mailto"]
+        task = svc.proxmox.nodes(node).vzdump.post(**kwargs)
+        return {"status": "ok", "task_id": task}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.delete("/{cluster_id}/nodes/{node}/backups", dependencies=[Depends(require_operator_or_admin)])
+def delete_backup(cluster_id: int, node: str, volid: str, db: Session = Depends(get_db)):
+    """Elimina un backup. volid = 'storage:backup/vzdump-qemu-100-...vma.zst'"""
+    cluster = _get_cluster_or_404(cluster_id, db)
+    try:
+        svc = ProxmoxService(cluster)
+        # Extract storage from volid
+        storage = volid.split(":")[0]
+        svc.proxmox.nodes(node).storage(storage).content(volid).delete()
+        return {"status": "deleted"}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.post("/{cluster_id}/nodes/{node}/restore", dependencies=[Depends(require_admin)])
+def restore_backup(cluster_id: int, node: str, payload: dict, db: Session = Depends(get_db)):
+    """Ripristina un backup in una nuova VM/CT.
+    payload: {vmid, volid, type (qemu/lxc), storage, force (0/1), start (0/1), hostname, name}"""
+    cluster = _get_cluster_or_404(cluster_id, db)
+    try:
+        svc = ProxmoxService(cluster)
+        vtype = payload.get("type", "qemu")
+        kwargs = {
+            "vmid": int(payload["vmid"]),
+            "force": int(payload.get("force", 0)),
+            "start": int(payload.get("start", 0)),
+        }
+        if vtype == "lxc":
+            kwargs["ostemplate"] = payload["volid"]
+            kwargs["restore"] = 1
+            if payload.get("storage"):
+                kwargs["rootfs"] = f"{payload['storage']}:0"
+            if payload.get("hostname"):
+                kwargs["hostname"] = payload["hostname"]
+            task = svc.proxmox.nodes(node).lxc.post(**kwargs)
+        else:
+            kwargs["archive"] = payload["volid"]
+            if payload.get("storage"):
+                kwargs["storage"] = payload["storage"]
+            if payload.get("name"):
+                kwargs["name"] = payload["name"]
+            task = svc.proxmox.nodes(node).qemu.post(**kwargs)
+        return {"status": "ok", "task_id": task}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
 @router.get("/{cluster_id}/next_vmid")
 def next_vmid(cluster_id: int, db: Session = Depends(get_db)):
     cluster = _get_cluster_or_404(cluster_id, db)

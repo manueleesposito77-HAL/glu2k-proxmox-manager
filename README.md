@@ -336,6 +336,38 @@ docker-compose down -v
 docker-compose up --build -d
 ```
 
+### Login admin/admin non funziona
+
+Se al primo accesso `admin`/`admin` restituisce "Credenziali non valide", il bootstrap dell'admin potrebbe non essere avvenuto (il backend è partito prima del DB). Soluzioni:
+
+**1. Controlla i log:**
+```bash
+docker logs glu2k-api | grep bootstrap
+# Dovresti vedere: "[bootstrap] Creato admin default: admin/admin"
+```
+
+**2. Riavvia il backend forzatamente:**
+```bash
+docker restart glu2k-api
+docker logs glu2k-api | tail -20
+```
+
+**3. Reset admin di emergenza** (usa la SECRET_KEY dal `backend/.env`):
+```bash
+# leggi la SECRET_KEY
+grep SECRET_KEY backend/.env
+
+# chiama l'endpoint di reset
+curl -X POST "http://localhost:8000/api/v1/reset-admin?secret=$(grep SECRET_KEY backend/.env | cut -d= -f2)"
+```
+
+Dopo questo: login con `admin`/`admin` funzionerà.
+
+**4. Verifica DB connesso:**
+```bash
+docker exec glu2k-db psql -U nexus -d nexus_db -c "SELECT username,role,is_active FROM users;"
+```
+
 ## Sviluppo
 
 - **Hot reload**: backend con `uvicorn --reload`, frontend con Vite HMR (polling abilitato per Windows/Docker)
