@@ -6,9 +6,11 @@ from sqlalchemy.exc import OperationalError
 from app.core.config import get_settings
 from app.api.v1.cluster import router as cluster_router
 from app.api.v1.auth import router as auth_router
+from app.api.v1.audit import router as audit_router
 from app.database import engine, Base, SessionLocal
 from app.models.user import User
 from app.models.cluster import Cluster  # import per creare tabella
+from app.models.audit import AuditLog  # import per creare tabella
 from app.core.security import hash_password
 
 settings = get_settings()
@@ -71,6 +73,7 @@ app.add_middleware(
 # Include Routers
 app.include_router(auth_router, prefix=f"{settings.API_V1_STR}/auth", tags=["auth"])
 app.include_router(cluster_router, prefix=f"{settings.API_V1_STR}/clusters", tags=["clusters"])
+app.include_router(audit_router, prefix=f"{settings.API_V1_STR}/audit", tags=["audit"])
 
 @app.get("/")
 def root():

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.cluster import Cluster
@@ -6,7 +6,8 @@ from app.models.user import User
 from app.schemas.cluster import ClusterCreate, ClusterResponse, ClusterUpdate
 from app.services.proxmox_service import ProxmoxService
 from app.core.config import get_settings
-from app.core.security import require_any, require_admin, require_operator_or_admin
+from app.core.security import require_any, require_admin, require_operator_or_admin, get_current_user
+from app.core.audit import log_action
 from cryptography.fernet import Fernet
 from typing import List
 
@@ -19,32 +20,26 @@ def list_clusters(db: Session = Depends(get_db)):
     return db.query(Cluster).all()
 
 @router.post("/", response_model=ClusterResponse, dependencies=[Depends(require_admin)])
-def add_cluster(cluster_in: ClusterCreate, db: Session = Depends(get_db)):
-    # Cifratura del token
+def add_cluster(cluster_in: ClusterCreate, request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     encrypted_token = cipher.encrypt(cluster_in.auth_token.encode()).decode()
-    
     db_cluster = Cluster(
-        name=cluster_in.name,
-        host=cluster_in.host,
-        port=cluster_in.port,
-        auth_user=cluster_in.auth_user,
-        auth_token=encrypted_token,
-        auth_type=cluster_in.auth_type,
-        verify_ssl=cluster_in.verify_ssl
+        name=cluster_in.name, host=cluster_in.host, port=cluster_in.port,
+        auth_user=cluster_in.auth_user, auth_token=encrypted_token,
+        auth_type=cluster_in.auth_type, verify_ssl=cluster_in.verify_ssl
     )
-    
     db.add(db_cluster)
     db.commit()
     db.refresh(db_cluster)
+    log_action(db, request, user, "cluster_create", "cluster", db_cluster.id,
+               {"name": db_cluster.name, "host": db_cluster.host})
     return db_cluster
 
 @router.put("/{cluster_id}", response_model=ClusterResponse, dependencies=[Depends(require_admin)])
-def update_cluster(cluster_id: int, cluster_in: ClusterUpdate, db: Session = Depends(get_db)):
+def update_cluster(cluster_id: int, cluster_in: ClusterUpdate, request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     cluster = db.query(Cluster).filter(Cluster.id == cluster_id).first()
     if not cluster:
         raise HTTPException(status_code=404, detail="Cluster not found")
     data = cluster_in.model_dump(exclude_unset=True)
-    # Se arriva auth_token, cifralo (ignora se vuoto = non toccare)
     if "auth_token" in data:
         if data["auth_token"]:
             data["auth_token"] = cipher.encrypt(data["auth_token"].encode()).decode()
@@ -54,16 +49,20 @@ def update_cluster(cluster_id: int, cluster_in: ClusterUpdate, db: Session = Dep
         setattr(cluster, k, v)
     db.commit()
     db.refresh(cluster)
+    log_action(db, request, user, "cluster_update", "cluster", cluster.id,
+               {"name": cluster.name, "changes": list(data.keys())})
     return cluster
 
 
 @router.delete("/{cluster_id}", dependencies=[Depends(require_admin)])
-def delete_cluster(cluster_id: int, db: Session = Depends(get_db)):
+def delete_cluster(cluster_id: int, request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     cluster = db.query(Cluster).filter(Cluster.id == cluster_id).first()
     if not cluster:
         raise HTTPException(status_code=404, detail="Cluster not found")
+    name = cluster.name
     db.delete(cluster)
     db.commit()
+    log_action(db, request, user, "cluster_delete", "cluster", cluster_id, {"name": name})
     return {"status": "deleted"}
 
 
@@ -839,22 +838,23 @@ def vm_update_snapshot(cluster_id: int, node: str, vmid: int, name: str, payload
 
 
 @router.post("/{cluster_id}/vms/{node}/{vmid}/action", dependencies=[Depends(require_operator_or_admin)])
-def vm_action(cluster_id: int, node: str, vmid: int, action: str, db: Session = Depends(get_db)):
+def vm_action(cluster_id: int, node: str, vmid: int, action: str, request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     if action not in ("start", "stop", "shutdown", "reset", "reboot"):
         raise HTTPException(status_code=400, detail="Invalid action")
     cluster = _get_cluster_or_404(cluster_id, db)
     try:
         svc = ProxmoxService(cluster)
-        # LXC usa un endpoint diverso rispetto a QEMU
         vms = svc.get_all_vms()
         vm = next((v for v in vms if v.get("vmid") == vmid and v.get("node") == node), None)
         if not vm:
             raise HTTPException(status_code=404, detail="VM not found")
-        vtype = vm.get("type")  # "qemu" or "lxc"
+        vtype = vm.get("type")
         if vtype == "lxc":
             task_id = svc.proxmox.nodes(node).lxc(vmid).status(action).post()
         else:
             task_id = svc.proxmox.nodes(node).qemu(vmid).status(action).post()
+        log_action(db, request, user, f"vm_{action}", vtype, f"{node}/{vmid}",
+                   {"cluster": cluster.name, "name": vm.get("name")})
         return {"status": "ok", "task_id": task_id}
     except HTTPException:
         raise

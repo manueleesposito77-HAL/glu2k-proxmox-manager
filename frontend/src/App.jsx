@@ -3388,6 +3388,7 @@ function App() {
     try { return JSON.parse(localStorage.getItem('glu2k_user') || 'null'); } catch { return null; }
   });
   const [showUsers, setShowUsers] = useState(false);
+  const [showAudit, setShowAudit] = useState(false);
 
   useEffect(() => {
     const onLogout = () => setCurrentUser(null);
@@ -3403,10 +3404,10 @@ function App() {
 
   if (!currentUser) return <LoginPage onLogin={setCurrentUser}/>;
 
-  return <MainApp currentUser={currentUser} onLogout={logout} showUsers={showUsers} setShowUsers={setShowUsers}/>;
+  return <MainApp currentUser={currentUser} onLogout={logout} showUsers={showUsers} setShowUsers={setShowUsers} showAudit={showAudit} setShowAudit={setShowAudit}/>;
 }
 
-function MainApp({ currentUser, onLogout, showUsers, setShowUsers }) {
+function MainApp({ currentUser, onLogout, showUsers, setShowUsers, showAudit, setShowAudit }) {
   const [theme, setTheme] = useState(() => localStorage.getItem('glu2k_theme') || 'dark');
 
   useEffect(() => {
@@ -3562,10 +3563,16 @@ function MainApp({ currentUser, onLogout, showUsers, setShowUsers }) {
             </div>
             <div className="flex gap-1">
               {currentUser.role === 'admin' && (
-                <button onClick={() => setShowUsers(true)} title="Gestione utenti"
-                  className="p-1.5 rounded text-slate-400 hover:text-white hover:bg-slate-600">
-                  <Settings className="w-4 h-4"/>
-                </button>
+                <>
+                  <button onClick={() => setShowAudit(true)} title="Audit Log"
+                    className="p-1.5 rounded text-slate-400 hover:text-white hover:bg-slate-600">
+                    <FileText className="w-4 h-4"/>
+                  </button>
+                  <button onClick={() => setShowUsers(true)} title="Gestione utenti"
+                    className="p-1.5 rounded text-slate-400 hover:text-white hover:bg-slate-600">
+                    <Settings className="w-4 h-4"/>
+                  </button>
+                </>
               )}
               <button onClick={onLogout} title="Logout"
                 className="p-1.5 rounded text-slate-400 hover:text-white hover:bg-red-900/50">
@@ -3717,6 +3724,7 @@ function MainApp({ currentUser, onLogout, showUsers, setShowUsers }) {
       )}
 
       {showUsers && <UsersModal onClose={() => setShowUsers(false)}/>}
+      {showAudit && <AuditLogModal onClose={() => setShowAudit(false)}/>}
     </div>
   );
 }
@@ -3958,6 +3966,141 @@ const ClusterSummaryCard = ({ cluster, onClick }) => {
           )}
         </>
       )}
+    </div>
+  );
+};
+
+const AuditLogModal = ({ onClose }) => {
+  const [logs, setLogs] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [actions, setActions] = useState([]);
+  const [usernames, setUsernames] = useState([]);
+  const [filters, setFilters] = useState({ username:'', action:'', status:'', since_hours:'' });
+  const [expanded, setExpanded] = useState(null);
+
+  const fetchLogs = async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ limit: '200' });
+      Object.entries(filters).forEach(([k,v]) => { if (v) params.append(k, v); });
+      const res = await axios.get(`${API_BASE}/audit?${params}`);
+      setLogs(res.data.items || []);
+      setTotal(res.data.total || 0);
+    } catch (err) { console.error(err); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { fetchLogs(); }, [filters]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const [a, u] = await Promise.all([
+          axios.get(`${API_BASE}/audit/actions`),
+          axios.get(`${API_BASE}/audit/usernames`),
+        ]);
+        setActions(a.data || []); setUsernames(u.data || []);
+      } catch {}
+    })();
+  }, []);
+
+  const fmtTime = (iso) => iso ? new Date(iso).toLocaleString() : '-';
+  const actColor = (a, s) => {
+    if (s === 'failed') return 'bg-red-900/40 text-red-400';
+    if (a.startsWith('login')) return 'bg-blue-900/40 text-blue-400';
+    if (a.includes('delete')) return 'bg-red-900/40 text-red-400';
+    if (a.includes('create')) return 'bg-green-900/40 text-green-400';
+    if (a.includes('update') || a.includes('modify')) return 'bg-yellow-900/40 text-yellow-400';
+    if (a.startsWith('vm_')) return 'bg-purple-900/40 text-purple-400';
+    return 'bg-slate-700 text-slate-300';
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+      <div className="bg-slate-800 w-full max-w-6xl rounded-xl border border-slate-700 overflow-hidden max-h-[90vh] flex flex-col">
+        <div className="flex justify-between items-center p-5 border-b border-slate-700">
+          <h3 className="text-xl font-bold flex items-center gap-2">
+            <FileText className="w-5 h-5 text-blue-400"/> Audit Log <span className="text-slate-500 text-sm font-normal">({total} eventi)</span>
+          </h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-white"><X className="w-6 h-6"/></button>
+        </div>
+
+        <div className="p-4 border-b border-slate-700 grid grid-cols-2 md:grid-cols-5 gap-2">
+          <select value={filters.username} onChange={e => setFilters({...filters, username: e.target.value})}
+            className="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs">
+            <option value="">Tutti gli utenti</option>
+            {usernames.map(u => <option key={u} value={u}>{u}</option>)}
+          </select>
+          <select value={filters.action} onChange={e => setFilters({...filters, action: e.target.value})}
+            className="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs">
+            <option value="">Tutte le azioni</option>
+            {actions.map(a => <option key={a} value={a}>{a}</option>)}
+          </select>
+          <select value={filters.status} onChange={e => setFilters({...filters, status: e.target.value})}
+            className="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs">
+            <option value="">Tutti gli stati</option>
+            <option value="success">Success</option>
+            <option value="failed">Failed</option>
+          </select>
+          <select value={filters.since_hours} onChange={e => setFilters({...filters, since_hours: e.target.value})}
+            className="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs">
+            <option value="">Tutto</option>
+            <option value="1">Ultima ora</option>
+            <option value="24">Ultimo giorno</option>
+            <option value="168">Ultima settimana</option>
+            <option value="720">Ultimo mese</option>
+          </select>
+          <button onClick={fetchLogs} className="flex items-center justify-center gap-1 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded text-xs">
+            <RefreshCw className="w-3.5 h-3.5"/> Aggiorna
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+          {loading ? (
+            <div className="p-4 text-slate-400 text-sm">Caricamento...</div>
+          ) : logs.length === 0 ? (
+            <div className="p-8 text-center text-slate-500 text-sm">Nessun evento</div>
+          ) : (
+            <table className="w-full text-xs">
+              <thead className="bg-slate-900/50 text-slate-400 uppercase sticky top-0">
+                <tr>
+                  <th className="px-3 py-2 w-6"></th>
+                  <th className="px-3 py-2 text-left">Timestamp</th>
+                  <th className="px-3 py-2 text-left">Utente</th>
+                  <th className="px-3 py-2 text-left">Azione</th>
+                  <th className="px-3 py-2 text-left">Risorsa</th>
+                  <th className="px-3 py-2 text-left">IP</th>
+                  <th className="px-3 py-2 text-left">Stato</th>
+                </tr>
+              </thead>
+              <tbody>
+                {logs.map(l => (
+                  <React.Fragment key={l.id}>
+                    <tr className="border-t border-slate-700 hover:bg-slate-700/30 cursor-pointer" onClick={() => setExpanded(expanded === l.id ? null : l.id)}>
+                      <td className="px-3 py-2 text-slate-500">{expanded === l.id ? <ChevronDown className="w-3.5 h-3.5"/> : <ChevronRight className="w-3.5 h-3.5"/>}</td>
+                      <td className="px-3 py-2 text-slate-400">{fmtTime(l.timestamp)}</td>
+                      <td className="px-3 py-2 font-medium">{l.username || '-'}</td>
+                      <td className="px-3 py-2"><span className={`px-2 py-0.5 rounded text-xs font-medium ${actColor(l.action, l.status)}`}>{l.action}</span></td>
+                      <td className="px-3 py-2 font-mono text-slate-400">{l.resource_type ? `${l.resource_type}${l.resource_id ? '/'+l.resource_id : ''}` : '-'}</td>
+                      <td className="px-3 py-2 font-mono text-slate-500">{l.ip || '-'}</td>
+                      <td className="px-3 py-2">
+                        <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${l.status==='failed'?'bg-red-900/40 text-red-400':'bg-green-900/40 text-green-400'}`}>{l.status}</span>
+                      </td>
+                    </tr>
+                    {expanded === l.id && l.details && (
+                      <tr>
+                        <td colSpan="7" className="p-0 bg-slate-900/50">
+                          <pre className="p-3 text-[10px] font-mono text-slate-300 overflow-x-auto">{JSON.stringify(l.details, null, 2)}</pre>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
     </div>
   );
 };
