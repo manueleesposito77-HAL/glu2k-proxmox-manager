@@ -9,8 +9,8 @@ set -euo pipefail
 
 # ==== Default config ====
 CT_ID="${CT_ID:-$(pvesh get /cluster/nextid)}"
-HOSTNAME="${HOSTNAME:-}"
-HOSTNAME_DEFAULT="glu2k-proxmox-manager"
+CT_HOSTNAME="${CT_HOSTNAME:-}"
+CT_HOSTNAME_DEFAULT="glu2k-proxmox-manager"
 CORES="${CORES:-2}"
 MEMORY="${MEMORY:-2048}"
 SWAP="${SWAP:-512}"
@@ -61,12 +61,12 @@ TEMPLATE_PATH="${TEMPLATE_STORAGE}:vztmpl/${TEMPLATE}"
 ok "Template pronto: $TEMPLATE_PATH"
 
 # ==== Hostname (interattivo se non fornito) ====
-if [ -z "$HOSTNAME" ]; then
+if [ -z "$CT_HOSTNAME" ]; then
   echo
-  read -r -p "Hostname del container (invio per default '$HOSTNAME_DEFAULT'): " HOSTNAME_INPUT
-  HOSTNAME="${HOSTNAME_INPUT:-$HOSTNAME_DEFAULT}"
+  read -r -p "Hostname del container (invio per default '$CT_HOSTNAME_DEFAULT'): " CT_HOSTNAME_INPUT
+  CT_HOSTNAME="${CT_HOSTNAME_INPUT:-$CT_HOSTNAME_DEFAULT}"
 fi
-info "Hostname: $HOSTNAME"
+info "Hostname: $CT_HOSTNAME"
 
 # ==== Password ====
 if [ -z "$PASSWORD" ]; then
@@ -90,9 +90,9 @@ if [ -z "$PASSWORD" ]; then
 fi
 
 # ==== Crea container ====
-info "Creo LXC $CT_ID ($HOSTNAME)..."
+info "Creo LXC $CT_ID ($CT_HOSTNAME)..."
 pct create "$CT_ID" "$TEMPLATE_PATH" \
-  --hostname "$HOSTNAME" \
+  --hostname "$CT_HOSTNAME" \
   --cores "$CORES" \
   --memory "$MEMORY" \
   --swap "$SWAP" \
@@ -132,7 +132,7 @@ IP=$(pct exec "$CT_ID" -- hostname -I 2>/dev/null | awk '{print $1}')
 echo
 ok "INSTALLAZIONE COMPLETATA"
 echo "============================================"
-echo " Container ID:  $CT_ID ($HOSTNAME)"
+echo " Container ID:  $CT_ID ($CT_HOSTNAME)"
 echo " IP:            $IP"
 echo " Root pwd:      $PASSWORD"
 echo

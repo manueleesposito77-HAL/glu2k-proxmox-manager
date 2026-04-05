@@ -27,14 +27,14 @@ Al termine:
 ### Personalizzazione (variabili d'ambiente)
 
 ```bash
-CT_ID=200 HOSTNAME=glu2k MEMORY=4096 DISK_SIZE=16 STORAGE=local-zfs BRIDGE=vmbr0 \
+CT_ID=200 CT_HOSTNAME=glu2k MEMORY=4096 DISK_SIZE=16 STORAGE=local-zfs BRIDGE=vmbr0 \
   bash -c "$(curl -fsSL https://raw.githubusercontent.com/manueleesposito77-HAL/glu2k-proxmox-manager/main/scripts/proxmox-helper.sh)"
 ```
 
 | Variabile | Default | Note |
 |---|---|---|
 | `CT_ID` | next free | ID LXC |
-| `HOSTNAME` | `glu2k-manager` | |
+| `CT_HOSTNAME` | `glu2k-proxmox-manager` | |
 | `CORES` | `2` | |
 | `MEMORY` | `2048` (MB) | |
 | `SWAP` | `512` (MB) | |
