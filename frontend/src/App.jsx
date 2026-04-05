@@ -3522,24 +3522,17 @@ function MainApp({ currentUser, onLogout, showUsers, setShowUsers }) {
             Clusters
           </div>
           {clusters.map(c => (
-            <div key={c.id}
-              onClick={() => { setSelectedCluster(c); setSelectedNode(null); setSelectedVM(null); }}
-              className={`group flex items-center justify-between gap-2 px-4 py-2 text-sm cursor-pointer rounded-lg mb-1 ${selectedCluster?.id === c.id ? 'bg-slate-700 text-white' : 'text-slate-300 hover:bg-slate-700/50'}`}>
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-2 h-2 rounded-full bg-green-500 flex-shrink-0"></div>
-                <span className="truncate">{c.name}</span>
-              </div>
-              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button onClick={(e) => openEdit(c, e)} title="Modifica"
-                  className="text-slate-500 hover:text-blue-400">
-                  <Pencil className="w-3.5 h-3.5"/>
-                </button>
-                <button onClick={(e) => handleDelete(c, e)} title="Rimuovi"
-                  className="text-slate-500 hover:text-red-400">
-                  <X className="w-4 h-4"/>
-                </button>
-              </div>
-            </div>
+            <ClusterTreeItem key={c.id}
+              cluster={c}
+              isSelected={selectedCluster?.id === c.id && !selectedNode && !selectedVM}
+              selectedNodeName={selectedCluster?.id === c.id ? selectedNode : null}
+              selectedVmId={selectedCluster?.id === c.id && selectedVM ? `${selectedVM.node}-${selectedVM.vmid}` : null}
+              onSelectCluster={() => { setSelectedCluster(c); setSelectedNode(null); setSelectedVM(null); }}
+              onSelectNode={(n) => { setSelectedCluster(c); setSelectedNode(n); setSelectedVM(null); }}
+              onSelectVm={(vm) => { setSelectedCluster(c); setSelectedNode(null); setSelectedVM(vm); }}
+              onEdit={(e) => openEdit(c, e)}
+              onDelete={(e) => handleDelete(c, e)}
+            />
           ))}
           <button
             onClick={openAdd}
@@ -3727,6 +3720,116 @@ function MainApp({ currentUser, onLogout, showUsers, setShowUsers }) {
     </div>
   );
 }
+
+const ClusterTreeItem = ({ cluster, isSelected, selectedNodeName, selectedVmId, onSelectCluster, onSelectNode, onSelectVm, onEdit, onDelete }) => {
+  const [expanded, setExpanded] = useState(false);
+  const [nodes, setNodes] = useState([]);
+  const [vms, setVms] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [expandedNodes, setExpandedNodes] = useState(new Set());
+
+  // Auto-expand se il cluster contiene la selezione attuale
+  const hasSelection = selectedNodeName || selectedVmId;
+  useEffect(() => { if (hasSelection) setExpanded(true); }, [hasSelection]);
+
+  // Fetch on expand
+  useEffect(() => {
+    if (!expanded) return;
+    let cancelled = false;
+    const load = async () => {
+      setLoading(true);
+      try {
+        const [n, v] = await Promise.all([
+          axios.get(`${API_BASE}/clusters/${cluster.id}/nodes`),
+          axios.get(`${API_BASE}/clusters/${cluster.id}/vms`),
+        ]);
+        if (!cancelled) { setNodes(n.data || []); setVms(v.data || []); }
+      } catch {} finally { if (!cancelled) setLoading(false); }
+    };
+    load();
+    const iv = setInterval(load, 10000);
+    return () => { cancelled = true; clearInterval(iv); };
+  }, [expanded, cluster.id]);
+
+  const toggleNode = (nodeName) => {
+    setExpandedNodes(prev => {
+      const n = new Set(prev);
+      if (n.has(nodeName)) n.delete(nodeName); else n.add(nodeName);
+      return n;
+    });
+  };
+
+  return (
+    <div className="mb-0.5">
+      {/* Cluster row */}
+      <div className={`group flex items-center gap-1 px-2 py-1.5 text-sm cursor-pointer rounded-lg ${isSelected ? 'bg-slate-700 text-white' : 'text-slate-300 hover:bg-slate-700/50'}`}>
+        <button onClick={() => setExpanded(!expanded)} className="flex-shrink-0 text-slate-500 hover:text-white">
+          {expanded ? <ChevronDown className="w-3.5 h-3.5"/> : <ChevronRight className="w-3.5 h-3.5"/>}
+        </button>
+        <div onClick={onSelectCluster} className="flex items-center gap-2 min-w-0 flex-1">
+          <Server className="w-3.5 h-3.5 flex-shrink-0 text-blue-400"/>
+          <span className="truncate font-medium">{cluster.name}</span>
+        </div>
+        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button onClick={onEdit} title="Modifica" className="text-slate-500 hover:text-blue-400 p-0.5">
+            <Pencil className="w-3 h-3"/>
+          </button>
+          <button onClick={onDelete} title="Rimuovi" className="text-slate-500 hover:text-red-400 p-0.5">
+            <X className="w-3.5 h-3.5"/>
+          </button>
+        </div>
+      </div>
+
+      {/* Children: Nodes */}
+      {expanded && (
+        <div className="ml-3 border-l border-slate-700/50 pl-1">
+          {loading && <div className="text-[10px] text-slate-500 px-2 py-1">Caricamento...</div>}
+          {[...nodes].sort((a,b) => a.node.localeCompare(b.node)).map(n => {
+            const online = n.status === 'online';
+            const nodeVms = vms.filter(v => v.node === n.node).sort((a,b) => a.vmid - b.vmid);
+            const isNodeExpanded = expandedNodes.has(n.node);
+            const isNodeSelected = selectedNodeName === n.node;
+            return (
+              <div key={n.node}>
+                <div className={`group flex items-center gap-1 px-2 py-1 text-xs cursor-pointer rounded ${isNodeSelected ? 'bg-slate-700 text-white' : 'text-slate-400 hover:bg-slate-700/50'}`}>
+                  <button onClick={() => toggleNode(n.node)} className="flex-shrink-0 text-slate-500 hover:text-white">
+                    {nodeVms.length > 0 ? (isNodeExpanded ? <ChevronDown className="w-3 h-3"/> : <ChevronRight className="w-3 h-3"/>) : <span className="w-3"/>}
+                  </button>
+                  <div onClick={() => onSelectNode(n.node)} className="flex items-center gap-1.5 min-w-0 flex-1">
+                    <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${online ? 'bg-green-500' : 'bg-red-500'}`}></span>
+                    <Server className="w-3 h-3 flex-shrink-0 text-slate-500"/>
+                    <span className="truncate font-mono">{n.node}</span>
+                  </div>
+                </div>
+
+                {/* VM sotto il nodo */}
+                {isNodeExpanded && (
+                  <div className="ml-4 border-l border-slate-700/50 pl-1">
+                    {nodeVms.length === 0 ? (
+                      <div className="text-[10px] text-slate-600 px-2 py-0.5">no VM</div>
+                    ) : nodeVms.map(vm => {
+                      const isVmSelected = selectedVmId === `${vm.node}-${vm.vmid}`;
+                      const isRunning = vm.status === 'running';
+                      return (
+                        <div key={vm.id} onClick={() => onSelectVm(vm)}
+                          className={`flex items-center gap-1.5 px-2 py-0.5 text-[11px] cursor-pointer rounded ${isVmSelected ? 'bg-blue-900/40 text-blue-300' : 'text-slate-400 hover:bg-slate-700/50'}`}>
+                          <span className={`w-1 h-1 rounded-full flex-shrink-0 ${isRunning ? 'bg-green-500' : 'bg-slate-600'}`}></span>
+                          <span className="text-[9px] uppercase text-slate-600 font-mono">{vm.type==='lxc'?'CT':'VM'}</span>
+                          <span className="text-slate-600 text-[9px] font-mono">{vm.vmid}</span>
+                          <span className="truncate flex-1">{vm.name}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
 
 const ClusterSummaryCard = ({ cluster, onClick }) => {
   const [nodes, setNodes] = useState(null);
