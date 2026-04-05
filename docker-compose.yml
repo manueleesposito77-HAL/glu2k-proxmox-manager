@@ -39,6 +39,7 @@ services:
     volumes:
       - ./frontend:/app
       - /app/node_modules
+    restart: unless-stopped
 
   # --- Database (PostgreSQL) ---
   db:
@@ -71,6 +72,7 @@ services:
       - glu2k-net
     volumes:
       - redis_data:/data
+    restart: unless-stopped
 
 networks:
   glu2k-net:
