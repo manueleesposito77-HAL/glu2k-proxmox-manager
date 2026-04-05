@@ -762,6 +762,82 @@ def fw_vm_set_options(cluster_id: int, node: str, vmid: int, payload: dict, db: 
         raise HTTPException(status_code=502, detail=str(e))
 
 
+@router.get("/{cluster_id}/vms/{node}/{vmid}/snapshots")
+def vm_list_snapshots(cluster_id: int, node: str, vmid: int, db: Session = Depends(get_db)):
+    cluster = _get_cluster_or_404(cluster_id, db)
+    try:
+        svc = ProxmoxService(cluster)
+        handle, _ = _vm_handle(svc, node, vmid)
+        return handle.snapshot.get()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.post("/{cluster_id}/vms/{node}/{vmid}/snapshots", dependencies=[Depends(require_operator_or_admin)])
+def vm_create_snapshot(cluster_id: int, node: str, vmid: int, payload: dict, db: Session = Depends(get_db)):
+    """payload: {snapname, description, vmstate (0/1, solo QEMU)}"""
+    cluster = _get_cluster_or_404(cluster_id, db)
+    try:
+        svc = ProxmoxService(cluster)
+        handle, vtype = _vm_handle(svc, node, vmid)
+        kwargs = {"snapname": payload["snapname"]}
+        if payload.get("description"):
+            kwargs["description"] = payload["description"]
+        if vtype == "qemu" and payload.get("vmstate"):
+            kwargs["vmstate"] = int(payload["vmstate"])
+        task = handle.snapshot.post(**kwargs)
+        return {"status": "ok", "task_id": task}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.post("/{cluster_id}/vms/{node}/{vmid}/snapshots/{name}/rollback", dependencies=[Depends(require_operator_or_admin)])
+def vm_rollback_snapshot(cluster_id: int, node: str, vmid: int, name: str, db: Session = Depends(get_db)):
+    cluster = _get_cluster_or_404(cluster_id, db)
+    try:
+        svc = ProxmoxService(cluster)
+        handle, _ = _vm_handle(svc, node, vmid)
+        task = handle.snapshot(name).rollback.post()
+        return {"status": "ok", "task_id": task}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.delete("/{cluster_id}/vms/{node}/{vmid}/snapshots/{name}", dependencies=[Depends(require_operator_or_admin)])
+def vm_delete_snapshot(cluster_id: int, node: str, vmid: int, name: str, db: Session = Depends(get_db)):
+    cluster = _get_cluster_or_404(cluster_id, db)
+    try:
+        svc = ProxmoxService(cluster)
+        handle, _ = _vm_handle(svc, node, vmid)
+        task = handle.snapshot(name).delete()
+        return {"status": "ok", "task_id": task}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.put("/{cluster_id}/vms/{node}/{vmid}/snapshots/{name}", dependencies=[Depends(require_operator_or_admin)])
+def vm_update_snapshot(cluster_id: int, node: str, vmid: int, name: str, payload: dict, db: Session = Depends(get_db)):
+    """Aggiorna descrizione snapshot."""
+    cluster = _get_cluster_or_404(cluster_id, db)
+    try:
+        svc = ProxmoxService(cluster)
+        handle, _ = _vm_handle(svc, node, vmid)
+        handle.snapshot(name).config.put(description=payload.get("description", ""))
+        return {"status": "ok"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
 @router.post("/{cluster_id}/vms/{node}/{vmid}/action", dependencies=[Depends(require_operator_or_admin)])
 def vm_action(cluster_id: int, node: str, vmid: int, action: str, db: Session = Depends(get_db)):
     if action not in ("start", "stop", "shutdown", "reset", "reboot"):

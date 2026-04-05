@@ -1945,6 +1945,7 @@ const VMDetail = ({ cluster, vm, onBack }) => {
     { id: 'fwlog', title: 'Log Firewall VM' },
     { id: 'network', title: 'Interfacce di Rete VM' },
     { id: 'disks', title: 'Dischi / Volumi' },
+    { id: 'snapshots', title: 'Snapshot' },
     { id: 'backups', title: 'Backup' },
     { id: 'tasks', title: 'Log Tasks VM' },
     { id: 'raw', title: 'Config raw' },
@@ -2250,6 +2251,10 @@ const VMDetail = ({ cluster, vm, onBack }) => {
         <div style={{order: vmOrder('network')}}><VMNetworkSection cluster={cluster} vm={vm} vtype={vtype} config={config} netKeys={netKeys} onChange={fetchData}/></div>
       )}
 
+      {vmIsVisible('snapshots') && (
+        <div style={{order: vmOrder('snapshots')}}><SnapshotsSection cluster={cluster} vm={vm} isRunning={isRunning}/></div>
+      )}
+
       {vmIsVisible('backups') && (
         <div style={{order: vmOrder('backups')}}><BackupsSection cluster={cluster} vm={vm}/></div>
       )}
@@ -2434,6 +2439,158 @@ const DownloadAssetModal = ({ cluster, node, kind, onClose, onDownloaded }) => {
           <button onClick={onClose} className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded text-sm">Chiudi</button>
         </div>
       </div>
+    </div>
+  );
+};
+
+const SnapshotsSection = ({ cluster, vm, isRunning }) => {
+  const [snapshots, setSnapshots] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showCreate, setShowCreate] = useState(false);
+  const [form, setForm] = useState({ snapname: '', description: '', vmstate: 0 });
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      const res = await axios.get(`${API_BASE}/clusters/${cluster.id}/vms/${vm.node}/${vm.vmid}/snapshots`);
+      setSnapshots(res.data || []);
+    } catch (err) { console.error(err); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { fetchData(); }, [vm.vmid, vm.node]);
+
+  const createSnap = async () => {
+    if (!/^[a-zA-Z][a-zA-Z0-9_]{1,39}$/.test(form.snapname)) {
+      alert("Nome snapshot: lettera iniziale + max 40 caratteri alfanumerici/underscore");
+      return;
+    }
+    setBusy(true); setMsg(null);
+    try {
+      await axios.post(`${API_BASE}/clusters/${cluster.id}/vms/${vm.node}/${vm.vmid}/snapshots`, form);
+      setMsg({type:'ok', text:'Snapshot creato'});
+      setShowCreate(false);
+      setForm({ snapname: '', description: '', vmstate: 0 });
+      fetchData();
+    } catch (err) { setMsg({type:'err', text: err.response?.data?.detail || err.message}); }
+    finally { setBusy(false); }
+  };
+
+  const rollbackSnap = async (s) => {
+    if (!confirm(`Rollback a snapshot "${s.name}"?\nLo stato attuale verrà PERSO.`)) return;
+    try {
+      await axios.post(`${API_BASE}/clusters/${cluster.id}/vms/${vm.node}/${vm.vmid}/snapshots/${s.name}/rollback`);
+      setMsg({type:'ok', text:`Rollback a "${s.name}" avviato`});
+      setTimeout(fetchData, 2000);
+    } catch (err) { alert(err.response?.data?.detail || err.message); }
+  };
+
+  const delSnap = async (s) => {
+    if (!confirm(`Eliminare snapshot "${s.name}"?`)) return;
+    try {
+      await axios.delete(`${API_BASE}/clusters/${cluster.id}/vms/${vm.node}/${vm.vmid}/snapshots/${s.name}`);
+      fetchData();
+    } catch (err) { alert(err.response?.data?.detail || err.message); }
+  };
+
+  const fmtTime = (ts) => ts ? new Date(ts*1000).toLocaleString() : '-';
+  // Esclude snapshot "current" (stato attuale, non è un vero snapshot)
+  const realSnaps = snapshots.filter(s => s.name !== 'current');
+  const isLxc = vm.type === 'lxc';
+
+  return (
+    <div className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden mb-6">
+      <div className="p-4 border-b border-slate-700 flex items-center justify-between">
+        <div className="font-bold flex items-center gap-2">
+          <HardDrive className="w-4 h-4"/> Snapshot ({realSnaps.length})
+        </div>
+        <div className="flex gap-2">
+          <button onClick={fetchData} className="p-1.5 rounded hover:bg-slate-700 text-slate-400"><RefreshCw className="w-4 h-4"/></button>
+          <button onClick={() => setShowCreate(true)} className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded text-xs">
+            <Plus className="w-3.5 h-3.5"/> Nuovo Snapshot
+          </button>
+        </div>
+      </div>
+
+      {msg && <div className={`px-4 py-2 text-xs border-b border-slate-700 ${msg.type==='ok'?'bg-green-900/20 text-green-300':'bg-red-900/20 text-red-300'}`}>{msg.text}</div>}
+
+      {showCreate && (
+        <div className="p-4 border-b border-slate-700 bg-slate-900/30 space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">Nome * (lettera + alfanumerici/underscore)</label>
+              <input type="text" value={form.snapname} onChange={e => setForm({...form, snapname: e.target.value.replace(/[^a-zA-Z0-9_]/g,'')})}
+                placeholder="pre_update_2026"
+                className="w-full bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-sm font-mono"/>
+            </div>
+            {!isLxc && isRunning && (
+              <div className="flex items-center pt-5">
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={!!form.vmstate}
+                    onChange={e => setForm({...form, vmstate: e.target.checked ? 1 : 0})}/>
+                  Includi stato RAM (snapshot live)
+                </label>
+              </div>
+            )}
+          </div>
+          <div>
+            <label className="text-xs text-slate-400 block mb-1">Descrizione</label>
+            <input type="text" value={form.description} onChange={e => setForm({...form, description: e.target.value})}
+              placeholder="Note opzionali..." className="w-full bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-sm"/>
+          </div>
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setShowCreate(false)} className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded text-sm">Annulla</button>
+            <button onClick={createSnap} disabled={busy || !form.snapname}
+              className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm">
+              {busy ? <Loader2 className="w-4 h-4 animate-spin"/> : <Plus className="w-4 h-4"/>}
+              Crea Snapshot
+            </button>
+          </div>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="p-4 text-slate-400 text-sm">Caricamento...</div>
+      ) : realSnaps.length === 0 ? (
+        <div className="p-6 text-center text-slate-500 text-sm">Nessuno snapshot</div>
+      ) : (
+        <table className="w-full text-xs">
+          <thead className="bg-slate-900/50 text-slate-400 uppercase">
+            <tr>
+              <th className="px-3 py-2 text-left">Nome</th>
+              <th className="px-3 py-2 text-left">Data</th>
+              <th className="px-3 py-2 text-left">Parent</th>
+              <th className="px-3 py-2 text-left">Descrizione</th>
+              <th className="px-3 py-2 text-left">RAM</th>
+              <th className="px-3 py-2 text-right">Azioni</th>
+            </tr>
+          </thead>
+          <tbody>
+            {realSnaps.sort((a,b) => (b.snaptime||0) - (a.snaptime||0)).map(s => (
+              <tr key={s.name} className="border-t border-slate-700 hover:bg-slate-700/30">
+                <td className="px-3 py-2 font-mono font-medium text-blue-400">{s.name}</td>
+                <td className="px-3 py-2 text-slate-300">{fmtTime(s.snaptime)}</td>
+                <td className="px-3 py-2 font-mono text-slate-500">{s.parent || '-'}</td>
+                <td className="px-3 py-2 text-slate-400 truncate max-w-[240px]" title={s.description}>{s.description || '-'}</td>
+                <td className="px-3 py-2">{s.vmstate ? <Check className="w-4 h-4 text-green-400"/> : <X className="w-4 h-4 text-slate-600"/>}</td>
+                <td className="px-3 py-2 text-right">
+                  <div className="flex gap-1 justify-end">
+                    <button onClick={() => rollbackSnap(s)} title="Rollback"
+                      className="inline-flex items-center gap-1 px-2 py-0.5 bg-orange-600/20 hover:bg-orange-600 text-orange-300 hover:text-white border border-orange-500/30 rounded text-xs">
+                      <RefreshCw className="w-3 h-3"/> Rollback
+                    </button>
+                    <button onClick={() => delSnap(s)} title="Elimina"
+                      className="inline-flex items-center gap-1 px-2 py-0.5 bg-red-600/20 hover:bg-red-600 text-red-300 hover:text-white border border-red-500/30 rounded text-xs">
+                      <Trash2 className="w-3 h-3"/>
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 };
