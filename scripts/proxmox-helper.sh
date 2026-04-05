@@ -9,7 +9,8 @@ set -euo pipefail
 
 # ==== Default config ====
 CT_ID="${CT_ID:-$(pvesh get /cluster/nextid)}"
-HOSTNAME="${HOSTNAME:-nexus-manager}"
+HOSTNAME="${HOSTNAME:-}"
+HOSTNAME_DEFAULT="glu2k-proxmox-manager"
 CORES="${CORES:-2}"
 MEMORY="${MEMORY:-2048}"
 SWAP="${SWAP:-512}"
@@ -59,10 +60,33 @@ fi
 TEMPLATE_PATH="${TEMPLATE_STORAGE}:vztmpl/${TEMPLATE}"
 ok "Template pronto: $TEMPLATE_PATH"
 
+# ==== Hostname (interattivo se non fornito) ====
+if [ -z "$HOSTNAME" ]; then
+  echo
+  read -r -p "Hostname del container (invio per default '$HOSTNAME_DEFAULT'): " HOSTNAME_INPUT
+  HOSTNAME="${HOSTNAME_INPUT:-$HOSTNAME_DEFAULT}"
+fi
+info "Hostname: $HOSTNAME"
+
 # ==== Password ====
 if [ -z "$PASSWORD" ]; then
-  PASSWORD=$(openssl rand -base64 12)
-  info "Password root generata: $PASSWORD"
+  echo
+  echo "Imposta la password root del container LXC (invio = genera automaticamente)"
+  read -r -s -p "Password root: " PASSWORD
+  echo
+  if [ -n "$PASSWORD" ]; then
+    read -r -s -p "Conferma password: " PASSWORD_CONFIRM
+    echo
+    if [ "$PASSWORD" != "$PASSWORD_CONFIRM" ]; then
+      die "Le password non corrispondono"
+    fi
+    if [ ${#PASSWORD} -lt 5 ]; then
+      die "La password deve avere almeno 5 caratteri"
+    fi
+  else
+    PASSWORD=$(openssl rand -base64 12)
+    info "Password root generata: $PASSWORD"
+  fi
 fi
 
 # ==== Crea container ====
