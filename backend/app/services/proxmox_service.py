@@ -21,22 +21,41 @@ class ProxmoxService:
     def _decrypt_token(self, encrypted_token: str) -> str:
         return cipher.decrypt(encrypted_token.encode()).decode()
 
+    def _build_host_list(self) -> list:
+        """Ritorna la lista host primario + fallback per failover."""
+        hosts = [self.cluster.host]
+        if getattr(self.cluster, 'fallback_hosts', None):
+            extras = [h.strip() for h in self.cluster.fallback_hosts.split(',') if h.strip() and h.strip() != self.cluster.host]
+            hosts.extend(extras)
+        return hosts
+
+    def _try_connect(self, host: str) -> ProxmoxAPI:
+        token_or_password = self._decrypt_token(self.cluster.auth_token)
+        if self.cluster.auth_type == "token":
+            user, token_name = self.cluster.auth_user.split("!")
+            api = ProxmoxAPI(host, user=user, token_name=token_name, token_value=token_or_password,
+                             verify_ssl=self.cluster.verify_ssl, port=self.cluster.port, timeout=5)
+        else:
+            api = ProxmoxAPI(host, user=self.cluster.auth_user, password=token_or_password,
+                             verify_ssl=self.cluster.verify_ssl, port=self.cluster.port, timeout=5)
+        # Test: una chiamata leggera per verificare che il nodo risponda
+        api.version.get()
+        return api
+
     def _connect(self) -> ProxmoxAPI:
-        try:
-            token_or_password = self._decrypt_token(self.cluster.auth_token)
-            if self.cluster.auth_type == "token":
-                user, token_name = self.cluster.auth_user.split("!")
-                return ProxmoxAPI(
-                    self.cluster.host, user=user, token_name=token_name,
-                    token_value=token_or_password, verify_ssl=self.cluster.verify_ssl, port=self.cluster.port
-                )
-            return ProxmoxAPI(
-                self.cluster.host, user=self.cluster.auth_user,
-                password=token_or_password, verify_ssl=self.cluster.verify_ssl, port=self.cluster.port
-            )
-        except Exception as e:
-            logger.error(f"Failed to connect to cluster {self.cluster.name}: {str(e)}")
-            raise ConnectionError(f"Proxmox Connection Failed: {str(e)}")
+        hosts = self._build_host_list()
+        last_err = None
+        for h in hosts:
+            try:
+                api = self._try_connect(h)
+                if h != hosts[0]:
+                    logger.warning(f"Cluster {self.cluster.name}: connected via fallback host {h} (primary {hosts[0]} unreachable)")
+                return api
+            except Exception as e:
+                last_err = e
+                logger.warning(f"Connection to {h} failed: {e}")
+                continue
+        raise ConnectionError(f"Proxmox Connection Failed (all hosts tried: {', '.join(hosts)}): {last_err}")
 
     def get_all_vms(self):
         """Ritorna la lista di tutte le VM nel cluster"""

@@ -23,7 +23,9 @@ def list_clusters(db: Session = Depends(get_db)):
 def add_cluster(cluster_in: ClusterCreate, request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     encrypted_token = cipher.encrypt(cluster_in.auth_token.encode()).decode()
     db_cluster = Cluster(
-        name=cluster_in.name, host=cluster_in.host, port=cluster_in.port,
+        name=cluster_in.name, host=cluster_in.host,
+        fallback_hosts=cluster_in.fallback_hosts,
+        port=cluster_in.port,
         auth_user=cluster_in.auth_user, auth_token=encrypted_token,
         auth_type=cluster_in.auth_type, verify_ssl=cluster_in.verify_ssl
     )

@@ -804,9 +804,9 @@ const NodeDetail = ({ cluster, nodeName, onBack, onSelectVM }) => {
               `- ${vmCount} VM/CT in esecuzione verranno fermate\n` +
               `- Il nodo sarà offline per alcuni minuti\n` +
               `- Tutti i servizi ospitati saranno irraggiungibili\n\n` +
-              `Digita "REBOOT ${nodeName}" per confermare:`;
+              `Digita "riavvia" per confermare:`;
             const input = prompt(msg);
-            if (input !== `REBOOT ${nodeName}`) return;
+            if (input?.toLowerCase() !== 'riavvia') return;
             try {
               await axios.post(`${API_BASE}/clusters/${cluster.id}/nodes/${nodeName}/action?action=reboot`);
               alert(`Reboot di ${nodeName} avviato.`);
@@ -821,9 +821,9 @@ const NodeDetail = ({ cluster, nodeName, onBack, onSelectVM }) => {
               `- ${vmCount} VM/CT in esecuzione verranno fermate\n` +
               `- Il nodo RIMARRÀ SPENTO fino a power-on manuale\n` +
               `- Dovrai accendere il server fisicamente o via IPMI\n\n` +
-              `Digita "SHUTDOWN ${nodeName}" per confermare:`;
+              `Digita "spegni" per confermare:`;
             const input = prompt(msg);
-            if (input !== `SHUTDOWN ${nodeName}`) return;
+            if (input?.toLowerCase() !== 'spegni') return;
             try {
               await axios.post(`${API_BASE}/clusters/${cluster.id}/nodes/${nodeName}/action?action=shutdown`);
               alert(`Shutdown di ${nodeName} avviato.`);
@@ -3460,7 +3460,7 @@ function MainApp({ currentUser, onLogout, showUsers, setShowUsers, showAudit, se
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCluster, setEditingCluster] = useState(null);
   const [loading, setLoading] = useState(false);
-  const emptyForm = { name: '', host: '', port: 8006, auth_user: '', auth_token: '', auth_type: 'token', verify_ssl: false };
+  const emptyForm = { name: '', host: '', fallback_hosts: '', port: 8006, auth_user: '', auth_token: '', auth_type: 'token', verify_ssl: false };
   const [formData, setFormData] = useState(emptyForm);
 
   const fetchClusters = async () => {
@@ -3506,6 +3506,7 @@ function MainApp({ currentUser, onLogout, showUsers, setShowUsers, showAudit, se
     setFormData({
       name: cluster.name,
       host: cluster.host,
+      fallback_hosts: cluster.fallback_hosts || '',
       port: cluster.port,
       auth_user: cluster.auth_user,
       auth_token: '',
@@ -3688,11 +3689,20 @@ function MainApp({ currentUser, onLogout, showUsers, setShowUsers, showAudit, se
                     value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-400">IP / Hostname</label>
+                  <label className="text-sm font-medium text-slate-400">IP / Hostname principale</label>
                   <input required type="text" placeholder="192.168.1.100"
                     className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
                     value={formData.host} onChange={e => setFormData({...formData, host: e.target.value})} />
                 </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-slate-400">
+                  Fallback hosts <span className="text-xs text-slate-500">(opz. · virgola separati · failover se il principale è down)</span>
+                </label>
+                <input type="text" placeholder="192.168.1.101, 192.168.1.102"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none font-mono text-sm"
+                  value={formData.fallback_hosts || ''} onChange={e => setFormData({...formData, fallback_hosts: e.target.value})} />
               </div>
 
               <div className="space-y-2">

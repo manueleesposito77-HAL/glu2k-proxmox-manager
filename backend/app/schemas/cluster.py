@@ -4,6 +4,7 @@ from typing import Optional
 class ClusterBase(BaseModel):
     name: str
     host: str
+    fallback_hosts: Optional[str] = None
     port: int = 8006
     auth_user: str
     auth_type: str = "token"
@@ -15,6 +16,7 @@ class ClusterCreate(ClusterBase):
 class ClusterUpdate(BaseModel):
     name: Optional[str] = None
     host: Optional[str] = None
+    fallback_hosts: Optional[str] = None
     port: Optional[int] = None
     auth_user: Optional[str] = None
     auth_token: Optional[str] = None

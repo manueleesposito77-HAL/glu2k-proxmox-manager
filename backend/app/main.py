@@ -32,6 +32,22 @@ def wait_and_init_db(max_retries: int = 30, delay: int = 2):
 
 wait_and_init_db()
 
+# Micro-migration: add columns se mancanti (evita Alembic per semplicità)
+def run_migrations():
+    from sqlalchemy import text
+    migrations = [
+        "ALTER TABLE clusters ADD COLUMN IF NOT EXISTS fallback_hosts VARCHAR",
+    ]
+    with engine.connect() as conn:
+        for sql in migrations:
+            try:
+                conn.execute(text(sql))
+                conn.commit()
+            except Exception as e:
+                print(f"[migration] skip: {e}")
+
+run_migrations()
+
 # Bootstrap admin di default
 def bootstrap_admin():
     db: Session = SessionLocal()

@@ -8,6 +8,7 @@ class Cluster(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True, index=True, nullable=False)
     host = Column(String, nullable=False)
+    fallback_hosts = Column(String, nullable=True)  # CSV di host alternativi per failover
     port = Column(Integer, default=8006)
     
     # Auth
