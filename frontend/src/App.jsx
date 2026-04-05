@@ -796,9 +796,45 @@ const NodeDetail = ({ cluster, nodeName, onBack, onSelectVM }) => {
             {status?.pveversion} · kernel {status?.['current-kernel']?.release} · uptime {formatUptime(status?.uptime)}
           </p>
         </div>
-        <button onClick={fetchData} className="p-2 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white">
-          <RefreshCw className="w-4 h-4"/>
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={async () => {
+            const vmCount = vms.filter(v => v.status==='running').length;
+            const msg = `⚠️ REBOOT del nodo "${nodeName}"?\n\n` +
+              `Questo riavvierà il nodo Proxmox fisico!\n` +
+              `- ${vmCount} VM/CT in esecuzione verranno fermate\n` +
+              `- Il nodo sarà offline per alcuni minuti\n` +
+              `- Tutti i servizi ospitati saranno irraggiungibili\n\n` +
+              `Digita "REBOOT ${nodeName}" per confermare:`;
+            const input = prompt(msg);
+            if (input !== `REBOOT ${nodeName}`) return;
+            try {
+              await axios.post(`${API_BASE}/clusters/${cluster.id}/nodes/${nodeName}/action?action=reboot`);
+              alert(`Reboot di ${nodeName} avviato.`);
+            } catch (err) { alert(`Errore: ${err.response?.data?.detail || err.message}`); }
+          }} title="Reboot nodo" className="flex items-center gap-1 px-3 py-1.5 bg-yellow-700 hover:bg-yellow-600 rounded-lg text-xs font-medium text-white">
+            <RefreshCw className="w-3.5 h-3.5"/> Reboot
+          </button>
+          <button onClick={async () => {
+            const vmCount = vms.filter(v => v.status==='running').length;
+            const msg = `🛑 SHUTDOWN del nodo "${nodeName}"?\n\n` +
+              `ATTENZIONE: questa azione spegne il nodo Proxmox fisico!\n` +
+              `- ${vmCount} VM/CT in esecuzione verranno fermate\n` +
+              `- Il nodo RIMARRÀ SPENTO fino a power-on manuale\n` +
+              `- Dovrai accendere il server fisicamente o via IPMI\n\n` +
+              `Digita "SHUTDOWN ${nodeName}" per confermare:`;
+            const input = prompt(msg);
+            if (input !== `SHUTDOWN ${nodeName}`) return;
+            try {
+              await axios.post(`${API_BASE}/clusters/${cluster.id}/nodes/${nodeName}/action?action=shutdown`);
+              alert(`Shutdown di ${nodeName} avviato.`);
+            } catch (err) { alert(`Errore: ${err.response?.data?.detail || err.message}`); }
+          }} title="Shutdown nodo" className="flex items-center gap-1 px-3 py-1.5 bg-red-700 hover:bg-red-600 rounded-lg text-xs font-medium text-white">
+            <Power className="w-3.5 h-3.5"/> Shutdown
+          </button>
+          <button onClick={fetchData} className="p-2 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white">
+            <RefreshCw className="w-4 h-4"/>
+          </button>
+        </div>
       </div>
 
       <SectionManager sections={sections} meta={sectionMeta} onToggle={toggle} onMove={move} onReset={reset}/>

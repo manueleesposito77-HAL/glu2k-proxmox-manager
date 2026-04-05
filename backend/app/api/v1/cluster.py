@@ -93,6 +93,22 @@ def list_cluster_nodes(cluster_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=502, detail=str(e))
 
 
+@router.post("/{cluster_id}/nodes/{node}/action", dependencies=[Depends(require_admin)])
+def node_action(cluster_id: int, node: str, action: str, request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Shutdown o reboot del nodo Proxmox."""
+    if action not in ("shutdown", "reboot"):
+        raise HTTPException(status_code=400, detail="Invalid action (shutdown|reboot)")
+    cluster = _get_cluster_or_404(cluster_id, db)
+    try:
+        svc = ProxmoxService(cluster)
+        svc.proxmox.nodes(node).status.post(command=action)
+        log_action(db, request, user, f"node_{action}", "node", node,
+                   {"cluster": cluster.name})
+        return {"status": "ok"}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
 @router.get("/{cluster_id}/nodes/{node}/status")
 def node_status(cluster_id: int, node: str, db: Session = Depends(get_db)):
     cluster = _get_cluster_or_404(cluster_id, db)
