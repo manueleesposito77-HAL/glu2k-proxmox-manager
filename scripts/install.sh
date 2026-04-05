@@ -13,7 +13,14 @@ echo
 # Update
 apt-get update -qq
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-  git curl ca-certificates python3 python3-cryptography openssl
+  git curl ca-certificates python3 python3-cryptography openssl openssh-server
+
+# Abilita SSH root login con password
+echo "Configuro SSH per accesso root con password..."
+sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
+sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+systemctl enable ssh 2>/dev/null || true
+systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true
 
 # Docker
 if ! command -v docker >/dev/null 2>&1; then
