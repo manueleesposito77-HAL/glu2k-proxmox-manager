@@ -68,6 +68,53 @@ if [ -z "$CT_HOSTNAME" ]; then
 fi
 info "Hostname: $CT_HOSTNAME"
 
+# ==== Storage per il rootfs (interattivo se non fornito) ====
+if [ -z "${STORAGE_OVERRIDE:-}" ] && [ "$STORAGE" = "local-lvm" ]; then
+  echo
+  echo "Storage disponibili per il rootfs del container:"
+  # Lista storage che supportano rootdir/images
+  mapfile -t AVAIL_STORAGES < <(pvesm status -content rootdir 2>/dev/null | awk 'NR>1 && $3=="active" {print $1"|"$2"|"$5"|"$7}')
+  if [ ${#AVAIL_STORAGES[@]} -eq 0 ]; then
+    info "Nessuno storage con rootdir attivo trovato, uso default: $STORAGE"
+  else
+    i=1
+    declare -A STORAGE_MAP
+    for s in "${AVAIL_STORAGES[@]}"; do
+      IFS='|' read -r name type total avail <<< "$s"
+      # convert to GB
+      avail_gb=$(( avail / 1024 / 1024 ))
+      total_gb=$(( total / 1024 / 1024 ))
+      # Indica se dinamico
+      case "$type" in
+        zfspool|btrfs|cephfs|rbd|nfs) dyn="dinamico" ;;
+        lvmthin) dyn="dinamico (thin)" ;;
+        lvm) dyn="statico" ;;
+        dir) dyn="dinamico (sparse)" ;;
+        *) dyn="$type" ;;
+      esac
+      printf "  %d) %-20s [%s] %d GB liberi / %d GB totali — %s\n" "$i" "$name" "$type" "$avail_gb" "$total_gb" "$dyn"
+      STORAGE_MAP[$i]="$name"
+      i=$((i+1))
+    done
+    echo
+    read -r -p "Scegli storage (numero, invio per default 'local-lvm'): " STORAGE_CHOICE
+    if [ -n "$STORAGE_CHOICE" ] && [ -n "${STORAGE_MAP[$STORAGE_CHOICE]:-}" ]; then
+      STORAGE="${STORAGE_MAP[$STORAGE_CHOICE]}"
+    fi
+  fi
+fi
+info "Storage rootfs: $STORAGE"
+
+# ==== Dimensione disco (interattivo) ====
+if [ "$DISK_SIZE" = "12" ]; then
+  echo
+  read -r -p "Dimensione disco in GB (invio per default '$DISK_SIZE'): " DISK_INPUT
+  if [ -n "$DISK_INPUT" ] && [[ "$DISK_INPUT" =~ ^[0-9]+$ ]]; then
+    DISK_SIZE="$DISK_INPUT"
+  fi
+fi
+info "Dimensione disco: ${DISK_SIZE} GB"
+
 # ==== Password ====
 if [ -z "$PASSWORD" ]; then
   echo
