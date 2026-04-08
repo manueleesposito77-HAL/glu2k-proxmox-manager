@@ -34,10 +34,10 @@ class ProxmoxService:
         if self.cluster.auth_type == "token":
             user, token_name = self.cluster.auth_user.split("!")
             api = ProxmoxAPI(host, user=user, token_name=token_name, token_value=token_or_password,
-                             verify_ssl=self.cluster.verify_ssl, port=self.cluster.port, timeout=5)
+                             verify_ssl=self.cluster.verify_ssl, port=self.cluster.port, timeout=15)
         else:
             api = ProxmoxAPI(host, user=self.cluster.auth_user, password=token_or_password,
-                             verify_ssl=self.cluster.verify_ssl, port=self.cluster.port, timeout=5)
+                             verify_ssl=self.cluster.verify_ssl, port=self.cluster.port, timeout=15)
         # Test: una chiamata leggera per verificare che il nodo risponda
         api.version.get()
         return api
