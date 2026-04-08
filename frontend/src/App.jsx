@@ -1,8 +1,37 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Activity, Server, Database, HardDrive, Cpu, AlertCircle, Plus, X, Shield, ShieldOff, Loader2, Play, Square, Power, RefreshCw, Pencil, MemoryStick, Package, ArrowLeft, Download, Save, Settings, Network, Trash2, Check, Flame, GripVertical, FileText, ChevronRight, ChevronDown, Eye, EyeOff, LayoutGrid } from 'lucide-react';
+import { Activity, Server, Database, HardDrive, Cpu, AlertCircle, Plus, X, Shield, ShieldOff, Loader2, Play, Square, Power, RefreshCw, Pencil, MemoryStick, Package, ArrowLeft, Download, Save, Settings, Network, Trash2, Check, Flame, GripVertical, FileText, ChevronRight, ChevronDown, Eye, EyeOff, LayoutGrid, Timer } from 'lucide-react';
 
 const API_BASE = `${window.location.protocol}//${window.location.hostname}:8000/api/v1`;
+
+const traduciErrore = (err) => {
+  const msg = err.response?.data?.detail || err.message || String(err);
+  const map = {
+    'Network Error': 'Errore di rete: impossibile raggiungere il server.',
+    'timeout': 'Timeout: il server non ha risposto in tempo.',
+    'Request failed with status code 401': 'Sessione scaduta. Effettua nuovamente il login.',
+    'Request failed with status code 403': 'Permesso negato. Non hai i privilegi necessari.',
+    'Request failed with status code 404': 'Risorsa non trovata.',
+    'Request failed with status code 500': 'Errore interno del server. Riprova tra poco.',
+    'Request failed with status code 502': 'Il server non risponde (502). Verifica che Proxmox sia raggiungibile.',
+    'Request failed with status code 503': 'Servizio temporaneamente non disponibile.',
+    'Connection refused': 'Connessione rifiutata. Verifica che il server sia attivo.',
+    'EHOSTUNREACH': 'Host non raggiungibile. Verifica la connessione di rete.',
+    'ECONNREFUSED': 'Connessione rifiutata dal server.',
+    'ETIMEDOUT': 'Connessione scaduta per timeout.',
+  };
+  for (const [en, it] of Object.entries(map)) {
+    if (msg.includes(en)) return it;
+  }
+  if (msg.includes('authentication failure')) return 'Autenticazione fallita. Verifica le credenziali del cluster.';
+  if (msg.includes('permission denied')) return 'Permesso negato per questa operazione.';
+  if (msg.includes('already exists')) return 'Esiste già un elemento con questo nome/ID.';
+  if (msg.includes('not found')) return 'Elemento non trovato. Potrebbe essere stato rimosso.';
+  if (msg.includes('is running')) return 'Operazione non possibile: la VM/container è in esecuzione.';
+  if (msg.includes('is locked')) return 'Risorsa bloccata da un\'altra operazione in corso.';
+  if (msg.includes('too many requests')) return 'Troppe richieste. Attendi qualche secondo e riprova.';
+  return msg;
+};
 
 // Setup axios auth interceptor
 axios.interceptors.request.use(config => {
@@ -173,7 +202,7 @@ const ProgressBar = ({ value, max, color = 'bg-blue-500' }) => {
   );
 };
 
-const NodeDetail = ({ cluster, nodeName, onBack, onSelectVM }) => {
+const NodeDetail = ({ cluster, nodeName, onBack, onSelectVM, refreshInterval = 3 }) => {
   const [status, setStatus] = useState(null);
   const [storage, setStorage] = useState([]);
   const [updates, setUpdates] = useState([]);
@@ -243,7 +272,7 @@ const NodeDetail = ({ cluster, nodeName, onBack, onSelectVM }) => {
       resetIfaceForm();
       fetchData();
     } catch (err) {
-      alert(`Errore: ${err.response?.data?.detail || err.message}`);
+      alert(traduciErrore(err));
     } finally {
       setNetBusy(false);
     }
@@ -270,7 +299,7 @@ const NodeDetail = ({ cluster, nodeName, onBack, onSelectVM }) => {
       });
       setShowNewIface(true);
     } catch (err) {
-      alert(`Errore lettura: ${err.response?.data?.detail || err.message}`);
+      alert('Errore lettura: ' + traduciErrore(err));
     }
   };
 
@@ -281,7 +310,7 @@ const NodeDetail = ({ cluster, nodeName, onBack, onSelectVM }) => {
       await axios.post(`${API_BASE}/clusters/${cluster.id}/nodes/${nodeName}/network/apply`);
       setTimeout(fetchData, 2000);
     } catch (err) {
-      alert(`Errore: ${err.response?.data?.detail || err.message}`);
+      alert(traduciErrore(err));
     } finally {
       setNetBusy(false);
     }
@@ -294,7 +323,7 @@ const NodeDetail = ({ cluster, nodeName, onBack, onSelectVM }) => {
       await axios.post(`${API_BASE}/clusters/${cluster.id}/nodes/${nodeName}/network/revert`);
       fetchData();
     } catch (err) {
-      alert(`Errore: ${err.response?.data?.detail || err.message}`);
+      alert(traduciErrore(err));
     } finally {
       setNetBusy(false);
     }
@@ -306,15 +335,15 @@ const NodeDetail = ({ cluster, nodeName, onBack, onSelectVM }) => {
       await axios.delete(`${API_BASE}/clusters/${cluster.id}/nodes/${nodeName}/network/${iface}`);
       fetchData();
     } catch (err) {
-      alert(`Errore: ${err.response?.data?.detail || err.message}`);
+      alert(traduciErrore(err));
     }
   };
 
   useEffect(() => {
     fetchData();
-    const iv = setInterval(() => fetchData(true), 3000);
+    const iv = setInterval(() => fetchData(true), refreshInterval * 1000);
     return () => clearInterval(iv);
-  }, [nodeName, timeframe]);
+  }, [nodeName, timeframe, refreshInterval]);
 
   const sectionMeta = [
     { id: 'resources', title: 'Risorse (CPU/RAM/Disco/Swap)' },
@@ -335,7 +364,7 @@ const NodeDetail = ({ cluster, nodeName, onBack, onSelectVM }) => {
       await axios.post(`${API_BASE}/clusters/${cluster.id}/nodes/${nodeName}/updates/refresh`);
       setTimeout(fetchData, 2000);
     } catch (err) {
-      alert(`Errore: ${err.response?.data?.detail || err.message}`);
+      alert(traduciErrore(err));
     } finally {
       setRefreshing(false);
     }
@@ -810,7 +839,7 @@ const NodeDetail = ({ cluster, nodeName, onBack, onSelectVM }) => {
             try {
               await axios.post(`${API_BASE}/clusters/${cluster.id}/nodes/${nodeName}/action?action=reboot`);
               alert(`Reboot di ${nodeName} avviato.`);
-            } catch (err) { alert(`Errore: ${err.response?.data?.detail || err.message}`); }
+            } catch (err) { alert(traduciErrore(err)); }
           }} title="Reboot nodo" className="flex items-center gap-1 px-3 py-1.5 bg-yellow-700 hover:bg-yellow-600 rounded-lg text-xs font-medium text-white">
             <RefreshCw className="w-3.5 h-3.5"/> Reboot
           </button>
@@ -827,7 +856,7 @@ const NodeDetail = ({ cluster, nodeName, onBack, onSelectVM }) => {
             try {
               await axios.post(`${API_BASE}/clusters/${cluster.id}/nodes/${nodeName}/action?action=shutdown`);
               alert(`Shutdown di ${nodeName} avviato.`);
-            } catch (err) { alert(`Errore: ${err.response?.data?.detail || err.message}`); }
+            } catch (err) { alert(traduciErrore(err)); }
           }} title="Shutdown nodo" className="flex items-center gap-1 px-3 py-1.5 bg-red-700 hover:bg-red-600 rounded-lg text-xs font-medium text-white">
             <Power className="w-3.5 h-3.5"/> Shutdown
           </button>
@@ -1189,7 +1218,7 @@ const FirewallSection = ({ basePath, title, onToggleEnable, isVM }) => {
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [editingPos, setEditingPos] = useState(null);
-  const emptyRuleForm = { enable: 1, type: 'in', action: 'ACCEPT', proto: 'tcp', dport: '', source: '', dest: '', comment: '' };
+  const emptyRuleForm = { enable: 0, type: 'in', action: 'ACCEPT', proto: 'tcp', dport: '', source: '', dest: '', comment: '' };
   const [form, setForm] = useState(emptyRuleForm);
   const [busy, setBusy] = useState(false);
   const [dragPos, setDragPos] = useState(null);
@@ -1240,7 +1269,7 @@ const FirewallSection = ({ basePath, title, onToggleEnable, isVM }) => {
       setShowOptions(false);
       fetchData();
     } catch (err) {
-      alert(`Errore: ${err.response?.data?.detail || err.message}`);
+      alert(traduciErrore(err));
     } finally { setBusy(false); }
   };
 
@@ -1256,29 +1285,52 @@ const FirewallSection = ({ basePath, title, onToggleEnable, isVM }) => {
       }
       fetchData();
     } catch (err) {
-      alert(`Errore: ${err.response?.data?.detail || err.message}`);
+      alert(traduciErrore(err));
     } finally { setBusy(false); }
   };
 
   const saveRule = async () => {
     setBusy(true);
+    const isNew = editingPos === null;
     try {
       const payload = { ...form };
-      if (editingPos !== null) {
-        // Edit: mantieni TUTTI i campi (anche vuoti → backend li mette in delete)
-        // Rimuovi solo null/undefined
+      if (!isNew) {
         Object.keys(payload).forEach(k => { if (payload[k] === null || payload[k] === undefined) delete payload[k]; });
         await axios.put(`${basePath}/rules/${editingPos}`, payload);
       } else {
-        // Create: invia solo campi valorizzati
+        payload.enable = 0;
         Object.keys(payload).forEach(k => { if (payload[k] === '') delete payload[k]; });
         await axios.post(`${basePath}/rules`, payload);
+        // Sposta la regola appena creata (pos 0) in ultima posizione
+        const rulesAfter = await axios.get(`${basePath}/rules`);
+        if (rulesAfter.data.length > 1) {
+          await axios.put(`${basePath}/rules/0`, { moveto: rulesAfter.data.length });
+        }
       }
       closeRuleForm();
       fetchData();
     } catch (err) {
-      alert(`Errore: ${err.response?.data?.detail || err.message}`);
-    } finally { setBusy(false); }
+      alert(traduciErrore(err));
+      setBusy(false);
+      return;
+    }
+    setBusy(false);
+    if (isNew) {
+      setTimeout(async () => {
+        if (confirm('Regola aggiunta disattivata. Vuoi attivarla subito?')) {
+          try {
+            var res = await axios.get(basePath + '/rules');
+            var last = res.data[res.data.length - 1];
+            if (last) {
+              await axios.put(basePath + '/rules/' + last.pos, { enable: 1, type: last.type, action: last.action });
+              fetchData();
+            }
+          } catch (e) {
+            alert('Errore attivazione: ' + traduciErrore(e));
+          }
+        }
+      }, 500);
+    }
   };
 
   const startEditRule = (r) => {
@@ -1310,7 +1362,7 @@ const FirewallSection = ({ basePath, title, onToggleEnable, isVM }) => {
       });
       fetchData();
     } catch (err) {
-      alert(`Errore: ${err.response?.data?.detail || err.message}`);
+      alert(traduciErrore(err));
     }
   };
 
@@ -1320,7 +1372,7 @@ const FirewallSection = ({ basePath, title, onToggleEnable, isVM }) => {
       await axios.put(`${basePath}/rules/${fromPos}`, { moveto: toPos });
       fetchData();
     } catch (err) {
-      alert(`Errore spostamento: ${err.response?.data?.detail || err.message}`);
+      alert('Errore spostamento: ' + traduciErrore(err));
     }
   };
 
@@ -1330,7 +1382,7 @@ const FirewallSection = ({ basePath, title, onToggleEnable, isVM }) => {
       await axios.delete(`${basePath}/rules/${pos}`);
       fetchData();
     } catch (err) {
-      alert(`Errore: ${err.response?.data?.detail || err.message}`);
+      alert(traduciErrore(err));
     }
   };
 
@@ -1605,11 +1657,17 @@ const FirewallSection = ({ basePath, title, onToggleEnable, isVM }) => {
             </div>
           </div>
           <div className="flex items-center justify-between">
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={!!Number(form.enable)}
-                onChange={e => setForm({...form, enable: e.target.checked ? 1 : 0})}/>
-              Regola attiva
-            </label>
+            {editingPos !== null ? (
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={!!Number(form.enable)}
+                  onChange={e => setForm({...form, enable: e.target.checked ? 1 : 0})}/>
+                Regola attiva
+              </label>
+            ) : (
+              <span className="text-xs text-amber-400 flex items-center gap-1">
+                <AlertCircle className="w-3.5 h-3.5"/> Regola aggiunta disattivata in ultima posizione
+              </span>
+            )}
             <div className="flex gap-2">
               <button onClick={closeRuleForm} className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded text-sm">Annulla</button>
               <button onClick={saveRule} disabled={busy} className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm">
@@ -1706,7 +1764,7 @@ const VMNetworkSection = ({ cluster, vm, vtype, config, netKeys, onChange }) => 
       setEditing(null);
       onChange();
     } catch (err) {
-      alert(`Errore: ${err.response?.data?.detail || err.message}`);
+      alert(traduciErrore(err));
     } finally { setBusy(false); }
   };
 
@@ -1716,7 +1774,7 @@ const VMNetworkSection = ({ cluster, vm, vtype, config, netKeys, onChange }) => 
       await axios.put(`${API_BASE}/clusters/${cluster.id}/vms/${vm.node}/${vm.vmid}/config`, { delete: key });
       onChange();
     } catch (err) {
-      alert(`Errore: ${err.response?.data?.detail || err.message}`);
+      alert(traduciErrore(err));
     }
   };
 
@@ -1897,7 +1955,7 @@ const VmStatsCards = ({ status }) => {
   );
 };
 
-const VMDetail = ({ cluster, vm, onBack }) => {
+const VMDetail = ({ cluster, vm, onBack, refreshInterval = 3 }) => {
   const [config, setConfig] = useState(null);
   const [vtype, setVtype] = useState(null);
   const [status, setStatus] = useState(null);
@@ -1940,9 +1998,9 @@ const VMDetail = ({ cluster, vm, onBack }) => {
 
   useEffect(() => {
     fetchData();
-    const iv = setInterval(() => fetchData(true), 3000);
+    const iv = setInterval(() => fetchData(true), refreshInterval * 1000);
     return () => clearInterval(iv);
-  }, [vm.vmid, vm.node, timeframe]);
+  }, [vm.vmid, vm.node, timeframe, refreshInterval]);
 
   const save = async () => {
     setSaving(true);
@@ -1969,7 +2027,7 @@ const VMDetail = ({ cluster, vm, onBack }) => {
       await axios.post(`${API_BASE}/clusters/${cluster.id}/vms/${vm.node}/${vm.vmid}/action?action=${action}`);
       setTimeout(fetchData, 1500);
     } catch (err) {
-      alert(`Errore: ${err.response?.data?.detail || err.message}`);
+      alert(traduciErrore(err));
     }
   };
 
@@ -2519,7 +2577,7 @@ const SnapshotsSection = ({ cluster, vm, isRunning }) => {
       await axios.post(`${API_BASE}/clusters/${cluster.id}/vms/${vm.node}/${vm.vmid}/snapshots/${s.name}/rollback`);
       setMsg({type:'ok', text:`Rollback a "${s.name}" avviato`});
       setTimeout(fetchData, 2000);
-    } catch (err) { alert(err.response?.data?.detail || err.message); }
+    } catch (err) { alert(traduciErrore(err)); }
   };
 
   const delSnap = async (s) => {
@@ -2527,7 +2585,7 @@ const SnapshotsSection = ({ cluster, vm, isRunning }) => {
     try {
       await axios.delete(`${API_BASE}/clusters/${cluster.id}/vms/${vm.node}/${vm.vmid}/snapshots/${s.name}`);
       fetchData();
-    } catch (err) { alert(err.response?.data?.detail || err.message); }
+    } catch (err) { alert(traduciErrore(err)); }
   };
 
   const fmtTime = (ts) => ts ? new Date(ts*1000).toLocaleString() : '-';
@@ -2672,7 +2730,7 @@ const BackupsSection = ({ cluster, vm }) => {
     try {
       await axios.delete(`${API_BASE}/clusters/${cluster.id}/nodes/${vm.node}/backups?volid=${encodeURIComponent(b.volid)}`);
       fetchData();
-    } catch (err) { alert(err.response?.data?.detail || err.message); }
+    } catch (err) { alert(traduciErrore(err)); }
   };
 
   const restoreBackup = async (b) => {
@@ -2686,7 +2744,7 @@ const BackupsSection = ({ cluster, vm }) => {
         vmid: targetVmid, volid: b.volid, type: vm.type, force: force ? 1 : 0,
       });
       setMsg({type:'ok', text:'Restore avviato. Controlla il Log Tasks.'});
-    } catch (err) { alert(err.response?.data?.detail || err.message); }
+    } catch (err) { alert(traduciErrore(err)); }
   };
 
   const fmtTime = (ts) => ts ? new Date(ts*1000).toLocaleString() : '-';
@@ -3104,7 +3162,7 @@ const CreateVmModal = ({ cluster, nodes, onClose, onCreated }) => {
   );
 };
 
-const ClusterDetail = ({ cluster, onSelectNode, onSelectVM }) => {
+const ClusterDetail = ({ cluster, onSelectNode, onSelectVM, refreshInterval = 3 }) => {
   const [vms, setVms] = useState([]);
   const [nodes, setNodes] = useState([]);
   const [rrdAgg, setRrdAgg] = useState([]);
@@ -3160,9 +3218,9 @@ const ClusterDetail = ({ cluster, onSelectNode, onSelectVM }) => {
 
   useEffect(() => {
     fetchData();
-    const iv = setInterval(() => fetchData(true), 3000);
+    const iv = setInterval(() => fetchData(true), refreshInterval * 1000);
     return () => clearInterval(iv);
-  }, [cluster.id, timeframe]);
+  }, [cluster.id, timeframe, refreshInterval]);
 
   const sectionMeta = [
     { id: 'stats', title: 'Statistiche' },
@@ -3182,7 +3240,7 @@ const ClusterDetail = ({ cluster, onSelectNode, onSelectVM }) => {
       await axios.post(`${API_BASE}/clusters/${cluster.id}/vms/${vm.node}/${vm.vmid}/action?action=${action}`);
       setTimeout(fetchData, 1500);
     } catch (err) {
-      alert(`Errore: ${err.response?.data?.detail || err.message}`);
+      alert(traduciErrore(err));
     } finally {
       setActionLoading(null);
     }
@@ -3445,6 +3503,8 @@ function App() {
 
 function MainApp({ currentUser, onLogout, showUsers, setShowUsers, showAudit, setShowAudit }) {
   const [theme, setTheme] = useState(() => localStorage.getItem('glu2k_theme') || 'dark');
+  const [refreshInterval, setRefreshInterval] = useState(() => parseInt(localStorage.getItem('glu2k_refresh') || '3', 10));
+  useEffect(() => { localStorage.setItem('glu2k_refresh', String(refreshInterval)); }, [refreshInterval]);
 
   useEffect(() => {
     const classes = ['theme-dark', 'theme-light', 'theme-gray'];
@@ -3590,6 +3650,20 @@ function MainApp({ currentUser, onLogout, showUsers, setShowUsers, showAudit, se
             <button onClick={() => setTheme('light')} title="Light"
               className={`flex-1 py-1 rounded text-[10px] font-bold ${theme==='light' ? 'bg-slate-700 text-white' : 'bg-slate-900 text-slate-400 hover:bg-slate-800'}`}>LIGHT</button>
           </div>
+          <div className="flex items-center gap-2 px-1 mb-2">
+            <Timer className="w-3.5 h-3.5 text-slate-400"/>
+            <span className="text-[10px] font-bold text-slate-400 uppercase">Refresh</span>
+            <select value={refreshInterval} onChange={e => setRefreshInterval(Number(e.target.value))}
+              className="flex-1 bg-slate-900 text-slate-300 text-[11px] font-bold rounded px-2 py-1 border-none outline-none cursor-pointer">
+              <option value={1}>1s</option>
+              <option value={3}>3s</option>
+              <option value={5}>5s</option>
+              <option value={10}>10s</option>
+              <option value={15}>15s</option>
+              <option value={30}>30s</option>
+              <option value={60}>60s</option>
+            </select>
+          </div>
           <div className="flex items-center justify-between gap-2 px-2 py-1.5 rounded hover:bg-slate-700/50">
             <div className="min-w-0 flex-1">
               <div className="text-sm font-medium text-white truncate">{currentUser.username}</div>
@@ -3644,11 +3718,11 @@ function MainApp({ currentUser, onLogout, showUsers, setShowUsers, showAudit, se
         </header>
 
         {selectedCluster && selectedVM ? (
-          <VMDetail cluster={selectedCluster} vm={selectedVM} onBack={() => setSelectedVM(null)} key={`${selectedVM.node}-${selectedVM.vmid}`} />
+          <VMDetail cluster={selectedCluster} vm={selectedVM} onBack={() => setSelectedVM(null)} refreshInterval={refreshInterval} key={`${selectedVM.node}-${selectedVM.vmid}`} />
         ) : selectedCluster && selectedNode ? (
-          <NodeDetail cluster={selectedCluster} nodeName={selectedNode} onBack={() => setSelectedNode(null)} onSelectVM={setSelectedVM} key={selectedNode} />
+          <NodeDetail cluster={selectedCluster} nodeName={selectedNode} onBack={() => setSelectedNode(null)} onSelectVM={setSelectedVM} refreshInterval={refreshInterval} key={selectedNode} />
         ) : selectedCluster ? (
-          <ClusterDetail cluster={selectedCluster} onSelectNode={setSelectedNode} onSelectVM={setSelectedVM} key={selectedCluster.id} />
+          <ClusterDetail cluster={selectedCluster} onSelectNode={setSelectedNode} onSelectVM={setSelectedVM} refreshInterval={refreshInterval} key={selectedCluster.id} />
         ) : clusters.length === 0 ? (
           <div className="flex flex-col items-center justify-center p-12 bg-slate-800 rounded-xl border border-dashed border-slate-600 text-slate-400">
             <Server className="w-16 h-16 mb-4 opacity-20" />
@@ -4162,7 +4236,7 @@ const UsersModal = ({ onClose }) => {
     try {
       const res = await axios.get(`${API_BASE}/auth/users`);
       setUsers(res.data);
-    } catch (err) { alert(err.response?.data?.detail || err.message); }
+    } catch (err) { alert(traduciErrore(err)); }
   };
 
   useEffect(() => { fetchUsers(); }, []);
@@ -4182,7 +4256,7 @@ const UsersModal = ({ onClose }) => {
       setEditing(null);
       setForm({ username: '', password: '', role: 'viewer', is_active: true });
       fetchUsers();
-    } catch (err) { alert(err.response?.data?.detail || err.message); }
+    } catch (err) { alert(traduciErrore(err)); }
     finally { setLoading(false); }
   };
 
@@ -4191,7 +4265,7 @@ const UsersModal = ({ onClose }) => {
     try {
       await axios.delete(`${API_BASE}/auth/users/${u.id}`);
       fetchUsers();
-    } catch (err) { alert(err.response?.data?.detail || err.message); }
+    } catch (err) { alert(traduciErrore(err)); }
   };
 
   const startEdit = (u) => {
