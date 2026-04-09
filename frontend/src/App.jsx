@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Activity, Server, Database, HardDrive, Cpu, AlertCircle, Plus, X, Shield, ShieldOff, Loader2, Play, Square, Power, RefreshCw, Pencil, MemoryStick, Package, ArrowLeft, Download, Save, Settings, Network, Trash2, Check, Flame, GripVertical, FileText, ChevronRight, ChevronDown, Eye, EyeOff, LayoutGrid, Timer } from 'lucide-react';
+import { Activity, Server, Database, HardDrive, Cpu, AlertCircle, Plus, X, Shield, ShieldOff, Loader2, Play, Square, Power, RefreshCw, Pencil, MemoryStick, Package, ArrowLeft, Download, Save, Settings, Network, Trash2, Check, Flame, GripVertical, FileText, ChevronRight, ChevronDown, Eye, EyeOff, LayoutGrid, Timer, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 
 const API_BASE = `${window.location.protocol}//${window.location.hostname}:8000/api/v1`;
 
@@ -32,6 +32,45 @@ const traduciErrore = (err) => {
   if (msg.includes('too many requests')) return 'Troppe richieste. Attendi qualche secondo e riprova.';
   return msg;
 };
+
+// ---- Sortable table utilities ----
+const useSortable = (defaultKey = null, defaultDir = 'asc') => {
+  const [sortKey, setSortKey] = useState(defaultKey);
+  const [sortDir, setSortDir] = useState(defaultDir);
+  const requestSort = (key) => {
+    if (sortKey === key) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortKey(key);
+      setSortDir('asc');
+    }
+  };
+  const sortFn = (data) => {
+    if (!sortKey) return data;
+    return [...data].sort((a, b) => {
+      let va = a[sortKey], vb = b[sortKey];
+      if (va == null) va = '';
+      if (vb == null) vb = '';
+      if (typeof va === 'string') va = va.toLowerCase();
+      if (typeof vb === 'string') vb = vb.toLowerCase();
+      if (typeof va === 'number' && typeof vb === 'number') return sortDir === 'asc' ? va - vb : vb - va;
+      if (va < vb) return sortDir === 'asc' ? -1 : 1;
+      if (va > vb) return sortDir === 'asc' ? 1 : -1;
+      return 0;
+    });
+  };
+  return { sortKey, sortDir, requestSort, sortFn };
+};
+
+const SortTh = ({ label, sortKey, current, dir, onSort, className = '' }) => (
+  <th className={`px-3 py-2 text-left cursor-pointer select-none hover:text-slate-200 transition-colors ${className}`}
+    onClick={() => onSort(sortKey)}>
+    <span className="inline-flex items-center gap-1">
+      {label}
+      {current === sortKey ? (dir === 'asc' ? <ArrowUp className="w-3 h-3"/> : <ArrowDown className="w-3 h-3"/>) : <ArrowUpDown className="w-3 h-3 opacity-30"/>}
+    </span>
+  </th>
+);
 
 // Setup axios auth interceptor
 axios.interceptors.request.use(config => {
@@ -218,25 +257,23 @@ const NodeDetail = ({ cluster, nodeName, onBack, onSelectVM, refreshInterval = 3
   const [ifaceType, setIfaceType] = useState('bridge');
   const [ifaceForm, setIfaceForm] = useState({ iface: '', address: '', netmask: '', gateway: '', bridge_ports: '', slaves: '', bond_mode: 'balance-rr', 'vlan-raw-device': '', autostart: 1, mtu: '', comments: '' });
   const [netBusy, setNetBusy] = useState(false);
+  const storageSort = useSortable('storage', 'asc');
+  const netSort = useSortable('iface', 'asc');
+  const nodeVmSort = useSortable('vmid', 'asc');
+  const updSort = useSortable('Package', 'asc');
 
   const fetchData = async (silent = false) => {
     if (!silent) setLoading(true);
     setError(null);
     try {
-      const [s, st, up, nw, rd, vmsRes] = await Promise.all([
-        axios.get(`${API_BASE}/clusters/${cluster.id}/nodes/${nodeName}/status`),
-        axios.get(`${API_BASE}/clusters/${cluster.id}/nodes/${nodeName}/storage`),
-        axios.get(`${API_BASE}/clusters/${cluster.id}/nodes/${nodeName}/updates`).catch(() => ({data: []})),
-        axios.get(`${API_BASE}/clusters/${cluster.id}/nodes/${nodeName}/network`).catch(() => ({data: []})),
-        axios.get(`${API_BASE}/clusters/${cluster.id}/nodes/${nodeName}/rrddata?timeframe=${timeframe}`).catch(() => ({data: []})),
-        axios.get(`${API_BASE}/clusters/${cluster.id}/vms`).catch(() => ({data: []})),
-      ]);
-      setStatus(s.data);
-      setStorage(st.data);
-      setVms((vmsRes.data || []).filter(v => v.node === nodeName));
-      setUpdates(up.data || []);
-      setNetwork(nw.data || []);
-      setRrd(rd.data || []);
+      const res = await axios.get(`${API_BASE}/clusters/${cluster.id}/nodes/${nodeName}/summary?timeframe=${timeframe}`);
+      const d = res.data;
+      setStatus(d.status);
+      setStorage(d.storage || []);
+      setVms(d.vms || []);
+      setUpdates(d.updates || []);
+      setNetwork(d.network || []);
+      setRrd(d.rrddata || []);
     } catch (err) {
       setError(err.response?.data?.detail || err.message);
     } finally {
@@ -453,17 +490,17 @@ const NodeDetail = ({ cluster, nodeName, onBack, onSelectVM, refreshInterval = 3
         <table className="w-full text-sm">
           <thead className="bg-slate-900/50 text-slate-400 text-xs uppercase">
             <tr>
-              <th className="px-4 py-2 text-left">Nome</th>
-              <th className="px-4 py-2 text-left">Tipo</th>
-              <th className="px-4 py-2 text-left">Contenuto</th>
+              <SortTh label="Nome" sortKey="storage" current={storageSort.sortKey} dir={storageSort.sortDir} onSort={storageSort.requestSort} className="px-4"/>
+              <SortTh label="Tipo" sortKey="type" current={storageSort.sortKey} dir={storageSort.sortDir} onSort={storageSort.requestSort} className="px-4"/>
+              <SortTh label="Contenuto" sortKey="content" current={storageSort.sortKey} dir={storageSort.sortDir} onSort={storageSort.requestSort} className="px-4"/>
               <th className="px-4 py-2 text-left">Uso</th>
-              <th className="px-4 py-2 text-left">Utilizzato</th>
-              <th className="px-4 py-2 text-left">Totale</th>
-              <th className="px-4 py-2 text-left">Stato</th>
+              <SortTh label="Utilizzato" sortKey="used" current={storageSort.sortKey} dir={storageSort.sortDir} onSort={storageSort.requestSort} className="px-4"/>
+              <SortTh label="Totale" sortKey="total" current={storageSort.sortKey} dir={storageSort.sortDir} onSort={storageSort.requestSort} className="px-4"/>
+              <SortTh label="Stato" sortKey="active" current={storageSort.sortKey} dir={storageSort.sortDir} onSort={storageSort.requestSort} className="px-4"/>
             </tr>
           </thead>
           <tbody>
-            {[...storage].sort((a,b) => a.storage.localeCompare(b.storage)).map(s => (
+            {storageSort.sortFn(storage).map(s => (
               <tr key={s.storage} className="border-t border-slate-700">
                 <td className="px-4 py-3 font-medium">{s.storage}</td>
                 <td className="px-4 py-3 text-slate-400 uppercase text-xs">{s.type}</td>
@@ -560,18 +597,18 @@ const NodeDetail = ({ cluster, nodeName, onBack, onSelectVM, refreshInterval = 3
         <table className="w-full text-sm">
           <thead className="bg-slate-900/50 text-slate-400 text-xs uppercase">
             <tr>
-              <th className="px-4 py-2 text-left">Interfaccia</th>
-              <th className="px-4 py-2 text-left">Tipo</th>
-              <th className="px-4 py-2 text-left">Indirizzo/CIDR</th>
-              <th className="px-4 py-2 text-left">Gateway</th>
+              <SortTh label="Interfaccia" sortKey="iface" current={netSort.sortKey} dir={netSort.sortDir} onSort={netSort.requestSort} className="px-4"/>
+              <SortTh label="Tipo" sortKey="type" current={netSort.sortKey} dir={netSort.sortDir} onSort={netSort.requestSort} className="px-4"/>
+              <SortTh label="Indirizzo/CIDR" sortKey="cidr" current={netSort.sortKey} dir={netSort.sortDir} onSort={netSort.requestSort} className="px-4"/>
+              <SortTh label="Gateway" sortKey="gateway" current={netSort.sortKey} dir={netSort.sortDir} onSort={netSort.requestSort} className="px-4"/>
               <th className="px-4 py-2 text-left">Ports/Slaves</th>
-              <th className="px-4 py-2 text-left">Autostart</th>
-              <th className="px-4 py-2 text-left">Stato</th>
+              <SortTh label="Autostart" sortKey="autostart" current={netSort.sortKey} dir={netSort.sortDir} onSort={netSort.requestSort} className="px-4"/>
+              <SortTh label="Stato" sortKey="active" current={netSort.sortKey} dir={netSort.sortDir} onSort={netSort.requestSort} className="px-4"/>
               <th className="px-4 py-2 text-right">Azioni</th>
             </tr>
           </thead>
           <tbody>
-            {network.map(n => (
+            {netSort.sortFn(network).map(n => (
               <tr key={n.iface} className={`border-t border-slate-700 ${n.pending ? 'bg-yellow-900/10' : ''}`}>
                 <td className="px-4 py-2 font-mono font-medium">{n.iface}{n.pending && <span className="ml-2 text-xs text-yellow-400">(pending)</span>}</td>
                 <td className="px-4 py-2 text-slate-400 text-xs uppercase">{n.type}</td>
@@ -721,17 +758,17 @@ const NodeDetail = ({ cluster, nodeName, onBack, onSelectVM, refreshInterval = 3
           <table className="w-full text-sm">
             <thead className="bg-slate-900/50 text-slate-400 text-xs uppercase">
               <tr>
-                <th className="px-4 py-2 text-left">Stato</th>
-                <th className="px-4 py-2 text-left">VMID</th>
-                <th className="px-4 py-2 text-left">Nome</th>
-                <th className="px-4 py-2 text-left">Tipo</th>
-                <th className="px-4 py-2 text-left">CPU</th>
-                <th className="px-4 py-2 text-left">RAM</th>
-                <th className="px-4 py-2 text-left">Uptime</th>
+                <SortTh label="Stato" sortKey="status" current={nodeVmSort.sortKey} dir={nodeVmSort.sortDir} onSort={nodeVmSort.requestSort} className="px-4"/>
+                <SortTh label="VMID" sortKey="vmid" current={nodeVmSort.sortKey} dir={nodeVmSort.sortDir} onSort={nodeVmSort.requestSort} className="px-4"/>
+                <SortTh label="Nome" sortKey="name" current={nodeVmSort.sortKey} dir={nodeVmSort.sortDir} onSort={nodeVmSort.requestSort} className="px-4"/>
+                <SortTh label="Tipo" sortKey="type" current={nodeVmSort.sortKey} dir={nodeVmSort.sortDir} onSort={nodeVmSort.requestSort} className="px-4"/>
+                <SortTh label="CPU" sortKey="cpu" current={nodeVmSort.sortKey} dir={nodeVmSort.sortDir} onSort={nodeVmSort.requestSort} className="px-4"/>
+                <SortTh label="RAM" sortKey="mem" current={nodeVmSort.sortKey} dir={nodeVmSort.sortDir} onSort={nodeVmSort.requestSort} className="px-4"/>
+                <SortTh label="Uptime" sortKey="uptime" current={nodeVmSort.sortKey} dir={nodeVmSort.sortDir} onSort={nodeVmSort.requestSort} className="px-4"/>
               </tr>
             </thead>
             <tbody>
-              {[...vms].sort((a,b) => a.vmid - b.vmid).map(vm => {
+              {nodeVmSort.sortFn(vms).map(vm => {
                 const isRunning = vm.status === 'running';
                 const memPct = vm.maxmem ? Math.round((vm.mem / vm.maxmem) * 100) : 0;
                 return (
@@ -790,14 +827,14 @@ const NodeDetail = ({ cluster, nodeName, onBack, onSelectVM, refreshInterval = 3
             <table className="w-full text-sm">
               <thead className="bg-slate-900/50 text-slate-400 text-xs uppercase sticky top-0">
                 <tr>
-                  <th className="px-4 py-2 text-left">Pacchetto</th>
-                  <th className="px-4 py-2 text-left">Attuale</th>
-                  <th className="px-4 py-2 text-left">Nuova</th>
-                  <th className="px-4 py-2 text-left">Priority</th>
+                  <SortTh label="Pacchetto" sortKey="Package" current={updSort.sortKey} dir={updSort.sortDir} onSort={updSort.requestSort} className="px-4"/>
+                  <SortTh label="Attuale" sortKey="OldVersion" current={updSort.sortKey} dir={updSort.sortDir} onSort={updSort.requestSort} className="px-4"/>
+                  <SortTh label="Nuova" sortKey="Version" current={updSort.sortKey} dir={updSort.sortDir} onSort={updSort.requestSort} className="px-4"/>
+                  <SortTh label="Priority" sortKey="Priority" current={updSort.sortKey} dir={updSort.sortDir} onSort={updSort.requestSort} className="px-4"/>
                 </tr>
               </thead>
               <tbody>
-                {updates.map((u, i) => (
+                {updSort.sortFn(updates).map((u, i) => (
                   <tr key={`${u.Package}-${u.Version}-${i}`} className="border-t border-slate-700">
                     <td className="px-4 py-2 font-mono text-xs">{u.Package}</td>
                     <td className="px-4 py-2 text-slate-400 font-mono text-xs">{u.OldVersion}</td>
@@ -973,6 +1010,7 @@ const TasksSection = ({ tasksUrl, cluster, title = "Log Tasks" }) => {
   const [expanded, setExpanded] = useState(null);
   const [taskLog, setTaskLog] = useState(null);
   const [taskLogLoading, setTaskLogLoading] = useState(false);
+  const taskSort = useSortable('starttime', 'desc');
 
   const fetchTasks = async () => {
     setLoading(true);
@@ -1029,17 +1067,17 @@ const TasksSection = ({ tasksUrl, cluster, title = "Log Tasks" }) => {
             <thead className="bg-slate-900/50 text-slate-400 text-xs uppercase sticky top-0">
               <tr>
                 <th className="px-3 py-2 w-6"></th>
-                <th className="px-3 py-2 text-left">Inizio</th>
-                <th className="px-3 py-2 text-left">Tipo</th>
-                <th className="px-3 py-2 text-left">ID</th>
-                <th className="px-3 py-2 text-left">Nodo</th>
-                <th className="px-3 py-2 text-left">Utente</th>
+                <SortTh label="Inizio" sortKey="starttime" current={taskSort.sortKey} dir={taskSort.sortDir} onSort={taskSort.requestSort}/>
+                <SortTh label="Tipo" sortKey="type" current={taskSort.sortKey} dir={taskSort.sortDir} onSort={taskSort.requestSort}/>
+                <SortTh label="ID" sortKey="id" current={taskSort.sortKey} dir={taskSort.sortDir} onSort={taskSort.requestSort}/>
+                <SortTh label="Nodo" sortKey="node" current={taskSort.sortKey} dir={taskSort.sortDir} onSort={taskSort.requestSort}/>
+                <SortTh label="Utente" sortKey="user" current={taskSort.sortKey} dir={taskSort.sortDir} onSort={taskSort.requestSort}/>
                 <th className="px-3 py-2 text-left">Durata</th>
-                <th className="px-3 py-2 text-left">Stato</th>
+                <SortTh label="Stato" sortKey="status" current={taskSort.sortKey} dir={taskSort.sortDir} onSort={taskSort.requestSort}/>
               </tr>
             </thead>
             <tbody>
-              {tasks.map(t => {
+              {taskSort.sortFn(tasks).map(t => {
                 const isOk = t.status === 'OK';
                 const isRunning = !t.endtime;
                 return (
@@ -1169,7 +1207,7 @@ const FirewallLogSection = ({ logUrl, title = "Log Firewall" }) => {
           {lines.length === 0 ? (
             <>
               Nessun log disponibile.<br/>
-              <span className="text-xs">Abilita <code>log_level_in</code> nelle Opzioni Firewall o imposta <code>log=info</code> sulle singole regole.</span>
+              <span className="text-xs">Imposta <code>log=info</code> sulle singole regole firewall per abilitare il logging.</span>
             </>
           ) : 'Nessun match con i filtri correnti'}
         </div>
@@ -1212,13 +1250,202 @@ const FirewallLogSection = ({ logUrl, title = "Log Firewall" }) => {
   );
 };
 
+const ClusterFirewallLogSection = ({ logUrl, nodes = [] }) => {
+  const [lines, setLines] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState('all');
+  const [nodeFilter, setNodeFilter] = useState('all');
+  const [search, setSearch] = useState('');
+  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [showBulkLog, setShowBulkLog] = useState(false);
+  const [bulkLevel, setBulkLevel] = useState('info');
+  const [bulkDir, setBulkDir] = useState('both');
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkResult, setBulkResult] = useState(null);
+
+  const fetchLog = async () => {
+    setLoading(true);
+    try {
+      const res = await axios.get(`${logUrl}?limit=500`);
+      setLines(res.data || []);
+    } catch (err) {
+      console.error(err);
+    } finally { setLoading(false); }
+  };
+
+  useEffect(() => { fetchLog(); }, [logUrl]);
+  useEffect(() => {
+    if (!autoRefresh) return;
+    const iv = setInterval(fetchLog, 5000);
+    return () => clearInterval(iv);
+  }, [autoRefresh, logUrl]);
+
+  const nodeNames = [...new Set(lines.map(l => l.node))].sort();
+  const parsed = lines.map(l => ({ ...parseFwLogLine(l.t), node: l.node, n: l.n, raw: l.t }));
+  const filtered = parsed.filter(p => {
+    if (filter !== 'all' && p.policy !== filter) return false;
+    if (nodeFilter !== 'all' && p.node !== nodeFilter) return false;
+    if (search && !p.raw.toLowerCase().includes(search.toLowerCase())) return false;
+    return true;
+  });
+
+  const actionColor = (a) => a === 'ACCEPT' ? 'bg-green-900/40 text-green-400' : a === 'DROP' ? 'bg-red-900/40 text-red-400' : a === 'REJECT' ? 'bg-orange-900/40 text-orange-400' : 'bg-slate-700 text-slate-400';
+  const nodeColor = (n) => {
+    const colors = ['text-cyan-400', 'text-purple-400', 'text-amber-400', 'text-emerald-400', 'text-pink-400', 'text-blue-400'];
+    const idx = nodeNames.indexOf(n);
+    return colors[idx % colors.length];
+  };
+
+  const logLevelUrl = logUrl.replace('/firewall/log', '/firewall/log-level');
+  const applyBulkLogLevel = async () => {
+    if (!confirm(`Imposta log_level=${bulkLevel} (${bulkDir === 'both' ? 'IN+OUT' : bulkDir.toUpperCase()}) su tutte le VM/CT?`)) return;
+    setBulkBusy(true);
+    setBulkResult(null);
+    try {
+      const res = await axios.put(logLevelUrl, { level: bulkLevel, direction: bulkDir });
+      setBulkResult(res.data);
+    } catch (err) {
+      alert(traduciErrore(err));
+    } finally { setBulkBusy(false); }
+  };
+
+  return (
+    <div className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden mb-6">
+      <div className="p-4 border-b border-slate-700 flex items-center justify-between gap-3 flex-wrap">
+        <div className="font-bold flex items-center gap-2"><FileText className="w-4 h-4 text-orange-400"/> Log Firewall Aggregato Cluster</div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <select value={nodeFilter} onChange={e => setNodeFilter(e.target.value)}
+            className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs">
+            <option value="all">Tutti i nodi</option>
+            {nodeNames.map(n => <option key={n} value={n}>{n}</option>)}
+          </select>
+          <select value={filter} onChange={e => setFilter(e.target.value)}
+            className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs">
+            <option value="all">Tutte le azioni</option>
+            <option value="DROP">Solo DROP</option>
+            <option value="REJECT">Solo REJECT</option>
+            <option value="ACCEPT">Solo ACCEPT</option>
+          </select>
+          <input type="text" placeholder="Cerca IP/proto..." value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs w-40"/>
+          <label className="flex items-center gap-1 text-xs text-slate-400 cursor-pointer">
+            <input type="checkbox" checked={autoRefresh} onChange={e => setAutoRefresh(e.target.checked)}/>
+            Auto 5s
+          </label>
+          <button onClick={fetchLog} className="p-1.5 rounded hover:bg-slate-700 text-slate-400 hover:text-white">
+            <RefreshCw className="w-4 h-4"/>
+          </button>
+          <button onClick={() => setShowBulkLog(!showBulkLog)}
+            className={`flex items-center gap-1 px-2 py-1 rounded text-xs ${showBulkLog ? 'bg-orange-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>
+            <Settings className="w-3.5 h-3.5"/> Log VM
+          </button>
+        </div>
+      </div>
+      {showBulkLog && (
+        <div className="p-4 border-b border-slate-700 bg-slate-900/40">
+          <div className="text-xs text-slate-400 mb-3">
+            Imposta il livello di log firewall su <strong>tutte le VM/CT</strong> del cluster in un colpo solo.
+            Con <code>info</code> vedrai nel log aggregato tutti i pacchetti che matchano le regole firewall delle VM.
+            Con <code>nolog</code> disabiliti il logging (consigliato in produzione per ridurre I/O disco).
+          </div>
+          <div className="flex items-center gap-3 flex-wrap">
+            <div>
+              <label className="text-[10px] text-slate-500 block mb-0.5">Livello</label>
+              <select value={bulkLevel} onChange={e => setBulkLevel(e.target.value)}
+                className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs">
+                <option value="nolog">nolog (disabilita)</option>
+                <option value="info">info (consigliato per debug)</option>
+                <option value="warning">warning</option>
+                <option value="err">err</option>
+                <option value="debug">debug (verboso)</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] text-slate-500 block mb-0.5">Direzione</label>
+              <select value={bulkDir} onChange={e => setBulkDir(e.target.value)}
+                className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs">
+                <option value="both">IN + OUT</option>
+                <option value="in">Solo IN</option>
+                <option value="out">Solo OUT</option>
+              </select>
+            </div>
+            <div className="pt-3.5">
+              <button onClick={applyBulkLogLevel} disabled={bulkBusy}
+                className="flex items-center gap-1 px-3 py-1.5 bg-orange-600 hover:bg-orange-500 disabled:opacity-50 rounded text-xs font-medium">
+                {bulkBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin"/> : <Settings className="w-3.5 h-3.5"/>}
+                {bulkLevel === 'nolog' ? 'Disabilita log su tutte le VM' : `Abilita log (${bulkLevel}) su tutte le VM`}
+              </button>
+            </div>
+          </div>
+          {bulkResult && (
+            <div className={`mt-3 text-xs p-2 rounded ${bulkResult.errors > 0 ? 'bg-yellow-900/30 text-yellow-400' : 'bg-green-900/30 text-green-400'}`}>
+              Completato: {bulkResult.ok}/{bulkResult.total} VM aggiornate
+              {bulkResult.errors > 0 && ` · ${bulkResult.errors} errori`}
+            </div>
+          )}
+        </div>
+      )}
+      {loading ? (
+        <div className="p-4 text-slate-400 text-sm">Caricamento log da tutti i nodi...</div>
+      ) : filtered.length === 0 ? (
+        <div className="p-6 text-center text-slate-500 text-sm">
+          {lines.length === 0 ? (
+            <>
+              Nessun log disponibile su nessun nodo.<br/>
+              <span className="text-xs">Imposta <code>log=info</code> sulle singole regole firewall per abilitare il logging.</span>
+            </>
+          ) : 'Nessun match con i filtri correnti'}
+        </div>
+      ) : (
+        <div className="max-h-96 overflow-y-auto">
+          <table className="w-full text-xs">
+            <thead className="bg-slate-900/50 text-slate-400 uppercase sticky top-0">
+              <tr>
+                <th className="px-3 py-2 text-left">Nodo</th>
+                <th className="px-3 py-2 text-left">Timestamp</th>
+                <th className="px-3 py-2 text-left">Action</th>
+                <th className="px-3 py-2 text-left">Dir</th>
+                <th className="px-3 py-2 text-left">Proto</th>
+                <th className="px-3 py-2 text-left">Source</th>
+                <th className="px-3 py-2 text-left">Dest</th>
+                <th className="px-3 py-2 text-left">SPT→DPT</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((p, i) => (
+                <tr key={i} title={p.raw} className="border-t border-slate-700 hover:bg-slate-700/30 font-mono">
+                  <td className={`px-3 py-1.5 font-bold ${nodeColor(p.node)}`}>{p.node}</td>
+                  <td className="px-3 py-1.5 text-slate-500">{p.ts || '-'}</td>
+                  <td className="px-3 py-1.5">
+                    {p.policy && <span className={`px-2 py-0.5 rounded font-bold ${actionColor(p.policy)}`}>{p.policy}</span>}
+                  </td>
+                  <td className="px-3 py-1.5 text-slate-400">{p.direction || '-'}</td>
+                  <td className="px-3 py-1.5 text-slate-400">{p.proto || '-'}</td>
+                  <td className="px-3 py-1.5 text-slate-300">{p.src || '-'}</td>
+                  <td className="px-3 py-1.5 text-slate-300">{p.dst || '-'}</td>
+                  <td className="px-3 py-1.5 text-slate-400">{p.spt || '-'}{p.dpt ? `→${p.dpt}` : ''}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div className="px-4 py-2 bg-slate-900/30 text-[10px] text-slate-500 border-t border-slate-700">
+        {filtered.length} / {lines.length} eventi da {nodeNames.length} nod{nodeNames.length === 1 ? 'o' : 'i'}
+        {nodeFilter !== 'all' && ` · filtro: ${nodeFilter}`}
+      </div>
+    </div>
+  );
+};
+
 const FirewallSection = ({ basePath, title, onToggleEnable, isVM }) => {
   const [rules, setRules] = useState([]);
   const [options, setOptions] = useState({});
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [editingPos, setEditingPos] = useState(null);
-  const emptyRuleForm = { enable: 0, type: 'in', action: 'ACCEPT', proto: 'tcp', dport: '', source: '', dest: '', comment: '' };
+  const emptyRuleForm = { enable: 0, type: 'in', action: 'ACCEPT', proto: 'tcp', dport: '', source: '', dest: '', comment: '', log: '' };
   const [form, setForm] = useState(emptyRuleForm);
   const [busy, setBusy] = useState(false);
   const [dragPos, setDragPos] = useState(null);
@@ -1246,10 +1473,10 @@ const FirewallSection = ({ basePath, title, onToggleEnable, isVM }) => {
     const base = {
       policy_in: options.policy_in || 'DROP',
       policy_out: options.policy_out || 'ACCEPT',
-      log_level_in: options.log_level_in || 'nolog',
-      log_level_out: options.log_level_out || 'nolog',
     };
     if (isVM) {
+      base.log_level_in = options.log_level_in || 'nolog';
+      base.log_level_out = options.log_level_out || 'nolog';
       base.macfilter = options.macfilter ?? 1;
       base.ipfilter = options.ipfilter ?? 0;
       base.ndp = options.ndp ?? 0;
@@ -1344,6 +1571,7 @@ const FirewallSection = ({ basePath, title, onToggleEnable, isVM }) => {
       source: r.source || '',
       dest: r.dest || '',
       comment: r.comment || '',
+      log: r.log || '',
     });
     setShowAdd(true);
   };
@@ -1438,6 +1666,7 @@ const FirewallSection = ({ basePath, title, onToggleEnable, isVM }) => {
               </select>
               <p className="text-[11px] text-slate-500 mt-1">Cosa fare col traffico <strong>in uscita</strong> se nessuna regola matcha. ACCEPT è quasi sempre il default.</p>
             </div>
+            {isVM && (
             <div>
               <label className="text-xs text-slate-400 block mb-1">Log level IN</label>
               <select value={optForm.log_level_in || 'nolog'} onChange={e => setOptForm({...optForm, log_level_in: e.target.value})}
@@ -1454,6 +1683,8 @@ const FirewallSection = ({ basePath, title, onToggleEnable, isVM }) => {
               </select>
               <p className="text-[11px] text-slate-500 mt-1">Livello log pacchetti bloccati <strong>in ingresso</strong>. Usa <em>info</em> per debug, <em>nolog</em> in produzione.</p>
             </div>
+            )}
+            {isVM && (
             <div>
               <label className="text-xs text-slate-400 block mb-1">Log level OUT</label>
               <select value={optForm.log_level_out || 'nolog'} onChange={e => setOptForm({...optForm, log_level_out: e.target.value})}
@@ -1466,6 +1697,7 @@ const FirewallSection = ({ basePath, title, onToggleEnable, isVM }) => {
               </select>
               <p className="text-[11px] text-slate-500 mt-1">Livello log pacchetti bloccati <strong>in uscita</strong>.</p>
             </div>
+            )}
             {optForm.macfilter !== undefined && (
               <div>
                 <label className="flex items-center gap-2 text-sm">
@@ -1649,7 +1881,21 @@ const FirewallSection = ({ basePath, title, onToggleEnable, isVM }) => {
                 onChange={e => setForm({...form, dest: e.target.value})}
                 className="w-full bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-sm font-mono"/>
             </div>
-            <div className="md:col-span-2">
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">Log</label>
+              <select value={form.log || ''} onChange={e => setForm({...form, log: e.target.value})}
+                className="w-full bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-sm">
+                <option value="">nolog</option>
+                <option value="info">info</option>
+                <option value="warning">warning</option>
+                <option value="err">err</option>
+                <option value="alert">alert</option>
+                <option value="crit">crit</option>
+                <option value="debug">debug</option>
+                <option value="nolog">nolog (esplicito)</option>
+              </select>
+            </div>
+            <div>
               <label className="text-xs text-slate-400 block mb-1">Commento</label>
               <input type="text" value={form.comment}
                 onChange={e => setForm({...form, comment: e.target.value})}
@@ -2544,6 +2790,7 @@ const SnapshotsSection = ({ cluster, vm, isRunning }) => {
   const [form, setForm] = useState({ snapname: '', description: '', vmstate: 0 });
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
+  const snapSort = useSortable('snaptime', 'desc');
 
   const fetchData = async () => {
     setLoading(true);
@@ -2652,16 +2899,16 @@ const SnapshotsSection = ({ cluster, vm, isRunning }) => {
         <table className="w-full text-xs">
           <thead className="bg-slate-900/50 text-slate-400 uppercase">
             <tr>
-              <th className="px-3 py-2 text-left">Nome</th>
-              <th className="px-3 py-2 text-left">Data</th>
-              <th className="px-3 py-2 text-left">Parent</th>
+              <SortTh label="Nome" sortKey="name" current={snapSort.sortKey} dir={snapSort.sortDir} onSort={snapSort.requestSort}/>
+              <SortTh label="Data" sortKey="snaptime" current={snapSort.sortKey} dir={snapSort.sortDir} onSort={snapSort.requestSort}/>
+              <SortTh label="Parent" sortKey="parent" current={snapSort.sortKey} dir={snapSort.sortDir} onSort={snapSort.requestSort}/>
               <th className="px-3 py-2 text-left">Descrizione</th>
               <th className="px-3 py-2 text-left">RAM</th>
               <th className="px-3 py-2 text-right">Azioni</th>
             </tr>
           </thead>
           <tbody>
-            {realSnaps.sort((a,b) => (b.snaptime||0) - (a.snaptime||0)).map(s => (
+            {snapSort.sortFn(realSnaps).map(s => (
               <tr key={s.name} className="border-t border-slate-700 hover:bg-slate-700/30">
                 <td className="px-3 py-2 font-mono font-medium text-blue-400">{s.name}</td>
                 <td className="px-3 py-2 text-slate-300">{fmtTime(s.snaptime)}</td>
@@ -2697,13 +2944,14 @@ const BackupsSection = ({ cluster, vm }) => {
   const [form, setForm] = useState({ storage: '', mode: 'snapshot', compress: 'zstd', notes: '', remove: 0 });
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
+  const bkSort = useSortable('ctime', 'desc');
 
   const fetchData = async () => {
     setLoading(true);
     try {
       const [b, s] = await Promise.all([
-        axios.get(`${API_BASE}/clusters/${cluster.id}/nodes/${vm.node}/backups?vmid=${vm.vmid}`),
-        axios.get(`${API_BASE}/clusters/${cluster.id}/nodes/${vm.node}/storage`),
+        axios.get(`${API_BASE}/clusters/${cluster.id}/nodes/${vm.node}/backups?vmid=${vm.vmid}`).catch(() => ({data: []})),
+        axios.get(`${API_BASE}/clusters/${cluster.id}/nodes/${vm.node}/storage`).catch(() => ({data: []})),
       ]);
       setBackups(b.data || []);
       const backupStores = (s.data || []).filter(x => x.active && (x.content||'').includes('backup'));
@@ -2827,16 +3075,16 @@ const BackupsSection = ({ cluster, vm }) => {
         <table className="w-full text-xs">
           <thead className="bg-slate-900/50 text-slate-400 uppercase">
             <tr>
-              <th className="px-3 py-2 text-left">Data</th>
-              <th className="px-3 py-2 text-left">Storage</th>
-              <th className="px-3 py-2 text-left">File</th>
-              <th className="px-3 py-2 text-left">Size</th>
+              <SortTh label="Data" sortKey="ctime" current={bkSort.sortKey} dir={bkSort.sortDir} onSort={bkSort.requestSort}/>
+              <SortTh label="Storage" sortKey="_storage" current={bkSort.sortKey} dir={bkSort.sortDir} onSort={bkSort.requestSort}/>
+              <SortTh label="File" sortKey="volid" current={bkSort.sortKey} dir={bkSort.sortDir} onSort={bkSort.requestSort}/>
+              <SortTh label="Size" sortKey="size" current={bkSort.sortKey} dir={bkSort.sortDir} onSort={bkSort.requestSort}/>
               <th className="px-3 py-2 text-left">Note</th>
               <th className="px-3 py-2 text-right">Azioni</th>
             </tr>
           </thead>
           <tbody>
-            {backups.map(b => (
+            {bkSort.sortFn(backups).map(b => (
               <tr key={b.volid} className="border-t border-slate-700 hover:bg-slate-700/30">
                 <td className="px-3 py-2 text-slate-300">{fmtTime(b.ctime)}</td>
                 <td className="px-3 py-2 font-mono text-slate-400">{b._storage}</td>
@@ -2876,6 +3124,7 @@ const CreateVmModal = ({ cluster, nodes, onClose, onCreated }) => {
   const [error, setError] = useState(null);
   const [showDownload, setShowDownload] = useState(false);
   const [reloadTick, setReloadTick] = useState(0);
+  const [bridges, setBridges] = useState([]);
   const [form, setForm] = useState({
     hostname: '', name: '', password: '', ostemplate: '', iso: '',
     cores: 1, memory: 512, swap: 512,
@@ -2884,40 +3133,39 @@ const CreateVmModal = ({ cluster, nodes, onClose, onCreated }) => {
     ostype: 'l26', cpu: 'host', start: 0,
   });
 
-  useEffect(() => {
-    if (!node) return;
-    (async () => {
-      try {
-        const [nv, st] = await Promise.all([
-          axios.get(`${API_BASE}/clusters/${cluster.id}/next_vmid`),
-          axios.get(`${API_BASE}/clusters/${cluster.id}/nodes/${node}/storage`),
-        ]);
-        setVmid(nv.data.vmid);
-        setStorages(st.data.filter(s => s.active && ((s.content||'').includes('images') || (s.content||'').includes('rootdir'))));
-        const desired = kind === 'lxc' ? 'rootdir' : 'images';
-        const def = st.data.find(s => s.active && (s.content||'').includes(desired));
-        if (def) setForm(f => ({...f, storage: def.storage}));
-      } catch (err) { setError(err.response?.data?.detail || err.message); }
-    })();
-  }, [node, kind, cluster.id]);
+  const [tplStores, setTplStores] = useState([]);
+  const [tplStoreFilter, setTplStoreFilter] = useState('all');
 
   useEffect(() => {
     if (!node) return;
     (async () => {
       setLoading(true);
+      setError(null);
       try {
-        const st = await axios.get(`${API_BASE}/clusters/${cluster.id}/nodes/${node}/storage`);
+        const res = await axios.get(`${API_BASE}/clusters/${cluster.id}/nodes/${node}/create-wizard-data?kind=${kind}`);
+        const { vmid: newVmid, storage: stData, network: netData, contents } = res.data;
+
+        setVmid(newVmid);
+
+        // Storage per disco VM/CT
+        setStorages(stData.filter(s => s.active && ((s.content||'').includes('images') || (s.content||'').includes('rootdir'))));
+        const desired = kind === 'lxc' ? 'rootdir' : 'images';
+        const def = stData.find(s => s.active && (s.content||'').includes(desired));
+        if (def) setForm(f => ({...f, storage: def.storage}));
+
+        // Bridge
+        const br = (netData || []).filter(i => i.type === 'bridge' && i.active).sort((a,b) => a.iface.localeCompare(b.iface));
+        setBridges(br);
+        if (br.length > 0) setForm(f => ({...f, bridge: f.bridge || br[0].iface}));
+
+        // Template/ISO (già con _storage dal backend)
         const wanted = kind === 'lxc' ? 'vztmpl' : 'iso';
-        const stores = st.data.filter(s => s.active && (s.content||'').includes(wanted));
-        const all = [];
-        for (const s of stores) {
-          try {
-            const c = await axios.get(`${API_BASE}/clusters/${cluster.id}/nodes/${node}/storage/${s.storage}/content?content_type=${wanted}`);
-            all.push(...c.data);
-          } catch {}
-        }
-        if (kind === 'lxc') setTemplates(all); else setIsos(all);
-      } catch {} finally { setLoading(false); }
+        const contentStores = stData.filter(s => s.active && (s.content||'').includes(wanted));
+        setTplStores(contentStores);
+        setTplStoreFilter('all');
+        if (kind === 'lxc') setTemplates(contents); else setIsos(contents);
+      } catch (err) { setError(err.response?.data?.detail || err.message); }
+      finally { setLoading(false); }
     })();
   }, [node, kind, cluster.id, reloadTick]);
 
@@ -3026,10 +3274,23 @@ const CreateVmModal = ({ cluster, nodes, onClose, onCreated }) => {
                     <Download className="w-3 h-3"/> Scarica nuovo template
                   </button>
                 </div>
+                {tplStores.length > 1 && (
+                  <select value={tplStoreFilter} onChange={e => { setTplStoreFilter(e.target.value); setForm(f => ({...f, ostemplate: ''})); }}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm mb-2">
+                    <option value="all">Tutti gli storage ({templates.length} template)</option>
+                    {tplStores.map(s => {
+                      const count = templates.filter(t => t._storage === s.storage).length;
+                      const freeGB = s.total ? ((s.total - (s.used||0)) / 1073741824).toFixed(1) : '?';
+                      return <option key={s.storage} value={s.storage}>{s.storage} ({count} template) — {freeGB} GB liberi</option>;
+                    })}
+                  </select>
+                )}
                 <select required value={form.ostemplate} onChange={e => setForm({...form, ostemplate: e.target.value})}
                   className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm">
                   <option value="">-- seleziona --</option>
-                  {templates.map(t => <option key={t.volid} value={t.volid}>{t.volid.split('/').pop()}</option>)}
+                  {templates.filter(t => tplStoreFilter === 'all' || t._storage === tplStoreFilter).map(t => (
+                    <option key={t.volid} value={t.volid}>[{t._storage}] {t.volid.split('/').pop()}</option>
+                  ))}
                 </select>
                 {templates.length === 0 && !loading && <p className="text-xs text-yellow-400 mt-1">Nessun template. Clicca "Scarica nuovo template" per aggiungerne uno dal catalogo Proxmox/TurnKey.</p>}
               </div>
@@ -3050,10 +3311,23 @@ const CreateVmModal = ({ cluster, nodes, onClose, onCreated }) => {
                       <Download className="w-3 h-3"/> Scarica ISO
                     </button>
                   </div>
+                  {tplStores.length > 1 && (
+                    <select value={tplStoreFilter} onChange={e => { setTplStoreFilter(e.target.value); setForm(f => ({...f, iso: ''})); }}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm mb-2">
+                      <option value="all">Tutti gli storage ({isos.length} ISO)</option>
+                      {tplStores.map(s => {
+                        const count = isos.filter(i => i._storage === s.storage).length;
+                        const freeGB = s.total ? ((s.total - (s.used||0)) / 1073741824).toFixed(1) : '?';
+                        return <option key={s.storage} value={s.storage}>{s.storage} ({count} ISO) — {freeGB} GB liberi</option>;
+                      })}
+                    </select>
+                  )}
                   <select value={form.iso} onChange={e => setForm({...form, iso: e.target.value})}
                     className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm">
                     <option value="">-- nessuno --</option>
-                    {isos.map(i => <option key={i.volid} value={i.volid}>{i.volid.split('/').pop()}</option>)}
+                    {isos.filter(i => tplStoreFilter === 'all' || i._storage === tplStoreFilter).map(i => (
+                      <option key={i.volid} value={i.volid}>[{i._storage}] {i.volid.split('/').pop()}</option>
+                    ))}
                   </select>
                 </div>
                 <div>
@@ -3096,8 +3370,36 @@ const CreateVmModal = ({ cluster, nodes, onClose, onCreated }) => {
               <select required value={form.storage} onChange={e => setForm({...form, storage: e.target.value})}
                 className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm">
                 <option value="">-- seleziona --</option>
-                {storages.map(s => <option key={s.storage} value={s.storage}>{s.storage} ({s.type})</option>)}
+                {storages.map(s => {
+                  const used = s.used || 0;
+                  const total = s.total || 0;
+                  const freeGB = total > 0 ? ((total - used) / 1073741824).toFixed(1) : '?';
+                  const totalGB = total > 0 ? (total / 1073741824).toFixed(1) : '?';
+                  return <option key={s.storage} value={s.storage}>{s.storage} ({s.type}) — {freeGB} GB liberi / {totalGB} GB</option>;
+                })}
               </select>
+              {(() => {
+                const sel = storages.find(s => s.storage === form.storage);
+                if (!sel || !sel.total) return null;
+                const used = sel.used || 0;
+                const total = sel.total;
+                const pct = Math.round((used / total) * 100);
+                const usedGB = (used / 1073741824).toFixed(1);
+                const freeGB = ((total - used) / 1073741824).toFixed(1);
+                const totalGB = (total / 1073741824).toFixed(1);
+                const barColor = pct >= 90 ? 'bg-red-500' : pct >= 75 ? 'bg-orange-500' : 'bg-blue-500';
+                return (
+                  <div className="mt-1.5">
+                    <div className="flex justify-between text-[10px] text-slate-400 mb-0.5">
+                      <span>Usato: {usedGB} GB ({pct}%)</span>
+                      <span>Libero: {freeGB} GB / {totalGB} GB</span>
+                    </div>
+                    <div className="w-full h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                      <div className={`h-full ${barColor} rounded-full transition-all`} style={{width: `${pct}%`}}/>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
             <div>
               <label className="text-xs text-slate-400 block mb-1">Dimensione disco (GB) *</label>
@@ -3109,8 +3411,15 @@ const CreateVmModal = ({ cluster, nodes, onClose, onCreated }) => {
           <div className="grid grid-cols-3 gap-3">
             <div>
               <label className="text-xs text-slate-400 block mb-1">Bridge</label>
-              <input type="text" value={form.bridge} onChange={e => setForm({...form, bridge: e.target.value})}
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm font-mono"/>
+              <select value={form.bridge} onChange={e => setForm({...form, bridge: e.target.value})}
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm font-mono">
+                {bridges.map(b => (
+                  <option key={b.iface} value={b.iface}>
+                    {b.iface}{b.comments ? ` — ${b.comments.trim()}` : ''}{b.cidr ? ` (${b.cidr})` : ''}
+                  </option>
+                ))}
+                {bridges.length === 0 && <option value={form.bridge}>{form.bridge}</option>}
+              </select>
             </div>
             {kind === 'lxc' && (
               <>
@@ -3129,6 +3438,28 @@ const CreateVmModal = ({ cluster, nodes, onClose, onCreated }) => {
               </>
             )}
           </div>
+          {(() => {
+            const sel = bridges.find(b => b.iface === form.bridge);
+            if (!sel) return null;
+            return (
+              <div className="p-3 bg-slate-900/50 border border-slate-700 rounded-lg text-xs">
+                <div className="flex items-center gap-2 mb-2">
+                  <Network className="w-4 h-4 text-blue-400"/>
+                  <span className="font-bold text-slate-200">{sel.iface}</span>
+                  {sel.comments && <span className="text-slate-400">— {sel.comments.trim()}</span>}
+                  <span className={`ml-auto px-1.5 py-0.5 rounded text-[10px] font-bold ${sel.active ? 'bg-green-900/40 text-green-400' : 'bg-red-900/40 text-red-400'}`}>
+                    {sel.active ? 'ATTIVO' : 'INATTIVO'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 text-slate-400">
+                  <div>IP: <span className="text-slate-300 font-mono">{sel.address || sel.cidr || 'nessuno'}</span></div>
+                  <div>Gateway: <span className="text-slate-300 font-mono">{sel.gateway || '-'}</span></div>
+                  <div>Porte: <span className="text-slate-300 font-mono">{sel.bridge_ports || 'nessuna (interna)'}</span></div>
+                  <div>VLAN aware: <span className="text-slate-300">{sel['bridge_vlan_aware'] ? 'Sì' : 'No'}</span></div>
+                </div>
+              </div>
+            );
+          })()}
 
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={!!form.start} onChange={e => setForm({...form, start: e.target.checked ? 1 : 0})}/>
@@ -3172,28 +3503,20 @@ const ClusterDetail = ({ cluster, onSelectNode, onSelectVM, refreshInterval = 3 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [actionLoading, setActionLoading] = useState(null);
+  const vmSort = useSortable('vmid', 'asc');
 
   const fetchData = async (silent = false) => {
     if (!silent) setLoading(true);
     setError(null);
     try {
-      const [vmsRes, nodesRes, storageRes] = await Promise.all([
-        axios.get(`${API_BASE}/clusters/${cluster.id}/vms`),
-        axios.get(`${API_BASE}/clusters/${cluster.id}/nodes`),
-        axios.get(`${API_BASE}/clusters/${cluster.id}/storage`).catch(() => ({data: []})),
-      ]);
-      setVms(vmsRes.data);
-      setNodes(nodesRes.data);
-      setClusterStorage(storageRes.data || []);
-      // Fetch rrddata di ogni nodo e aggrega
-      const rrds = await Promise.all(
-        nodesRes.data.filter(n => n.status === 'online').map(n =>
-          axios.get(`${API_BASE}/clusters/${cluster.id}/nodes/${n.node}/rrddata?timeframe=${timeframe}`).then(r => r.data).catch(() => [])
-        )
-      );
-      // Unione per tempo
+      const res = await axios.get(`${API_BASE}/clusters/${cluster.id}/overview?timeframe=${timeframe}`);
+      const { vms: vmsData, nodes: nodesData, storage: storageData, rrddata } = res.data;
+      setVms(vmsData || []);
+      setNodes(nodesData || []);
+      setClusterStorage(storageData || []);
+      // Aggrega rrddata da tutti i nodi
       const byTime = {};
-      rrds.forEach(arr => arr.forEach(d => {
+      Object.values(rrddata || {}).forEach(arr => (arr || []).forEach(d => {
         const t = d.time;
         if (!byTime[t]) byTime[t] = { time: t, cpu: 0, memused: 0, memtotal: 0, netin: 0, netout: 0, loadavg: 0, _count: 0 };
         byTime[t].cpu += d.cpu || 0;
@@ -3228,6 +3551,7 @@ const ClusterDetail = ({ cluster, onSelectNode, onSelectVM, refreshInterval = 3 
     { id: 'nodes', title: 'Nodi' },
     { id: 'vms', title: 'VM e Container' },
     { id: 'firewall', title: 'Firewall Cluster' },
+    { id: 'fwlog', title: 'Log Firewall Aggregato' },
     { id: 'tasks', title: 'Log Tasks Cluster' },
   ];
   const { sections, toggle, move, reset } = useSectionManager('glu2k_cluster_sections', sectionMeta);
@@ -3386,20 +3710,20 @@ const ClusterDetail = ({ cluster, onSelectNode, onSelectVM, refreshInterval = 3 
         <table className="w-full text-sm">
           <thead className="bg-slate-900/50 text-slate-400 text-xs uppercase">
             <tr>
-              <th className="px-4 py-3 text-left">Stato</th>
-              <th className="px-4 py-3 text-left">VMID</th>
-              <th className="px-4 py-3 text-left">Nome</th>
-              <th className="px-4 py-3 text-left">Tipo</th>
-              <th className="px-4 py-3 text-left">Nodo</th>
-              <th className="px-4 py-3 text-left">CPU</th>
-              <th className="px-4 py-3 text-left">RAM</th>
-              <th className="px-4 py-3 text-left">Disco</th>
-              <th className="px-4 py-3 text-left">Uptime</th>
+              <SortTh label="Stato" sortKey="status" current={vmSort.sortKey} dir={vmSort.sortDir} onSort={vmSort.requestSort} className="px-4"/>
+              <SortTh label="VMID" sortKey="vmid" current={vmSort.sortKey} dir={vmSort.sortDir} onSort={vmSort.requestSort} className="px-4"/>
+              <SortTh label="Nome" sortKey="name" current={vmSort.sortKey} dir={vmSort.sortDir} onSort={vmSort.requestSort} className="px-4"/>
+              <SortTh label="Tipo" sortKey="type" current={vmSort.sortKey} dir={vmSort.sortDir} onSort={vmSort.requestSort} className="px-4"/>
+              <SortTh label="Nodo" sortKey="node" current={vmSort.sortKey} dir={vmSort.sortDir} onSort={vmSort.requestSort} className="px-4"/>
+              <SortTh label="CPU" sortKey="cpu" current={vmSort.sortKey} dir={vmSort.sortDir} onSort={vmSort.requestSort} className="px-4"/>
+              <SortTh label="RAM" sortKey="mem" current={vmSort.sortKey} dir={vmSort.sortDir} onSort={vmSort.requestSort} className="px-4"/>
+              <SortTh label="Disco" sortKey="maxdisk" current={vmSort.sortKey} dir={vmSort.sortDir} onSort={vmSort.requestSort} className="px-4"/>
+              <SortTh label="Uptime" sortKey="uptime" current={vmSort.sortKey} dir={vmSort.sortDir} onSort={vmSort.requestSort} className="px-4"/>
               <th className="px-4 py-3 text-right">Azioni</th>
             </tr>
           </thead>
           <tbody>
-            {vms.map(vm => {
+            {vmSort.sortFn(vms).map(vm => {
               const isRunning = vm.status === 'running';
               const memPct = vm.maxmem ? Math.round((vm.mem / vm.maxmem) * 100) : 0;
               const diskPct = vm.maxdisk ? Math.round((vm.disk / vm.maxdisk) * 100) : 0;
@@ -3460,6 +3784,11 @@ const ClusterDetail = ({ cluster, onSelectNode, onSelectVM, refreshInterval = 3 
   renderers.firewall = (
       <div className="mt-6">
         <FirewallSection basePath={`${API_BASE}/clusters/${cluster.id}/firewall`} title="Firewall Cluster (Datacenter)"/>
+      </div>
+  );
+  renderers.fwlog = (
+      <div className="mt-6">
+        <ClusterFirewallLogSection logUrl={`${API_BASE}/clusters/${cluster.id}/firewall/log`} nodes={nodes}/>
       </div>
   );
   renderers.tasks = (
@@ -3875,7 +4204,7 @@ const ClusterTreeItem = ({ cluster, isSelected, selectedNodeName, selectedVmId, 
       } catch {} finally { if (!cancelled) setLoading(false); }
     };
     load();
-    const iv = setInterval(load, 10000);
+    const iv = setInterval(load, 30000);
     return () => { cancelled = true; clearInterval(iv); };
   }, [expanded, cluster.id]);
 
@@ -3980,7 +4309,7 @@ const ClusterSummaryCard = ({ cluster, onClick }) => {
       }
     };
     fetchAll();
-    const iv = setInterval(fetchAll, 3000); // refresh 3s
+    const iv = setInterval(fetchAll, 15000);
     return () => { cancelled = true; clearInterval(iv); };
   }, [cluster.id]);
 
@@ -4098,6 +4427,7 @@ const AuditLogModal = ({ onClose }) => {
   const [usernames, setUsernames] = useState([]);
   const [filters, setFilters] = useState({ username:'', action:'', status:'', since_hours:'' });
   const [expanded, setExpanded] = useState(null);
+  const auditSort = useSortable('timestamp', 'desc');
 
   const fetchLogs = async () => {
     setLoading(true);
@@ -4185,16 +4515,16 @@ const AuditLogModal = ({ onClose }) => {
               <thead className="bg-slate-900/50 text-slate-400 uppercase sticky top-0">
                 <tr>
                   <th className="px-3 py-2 w-6"></th>
-                  <th className="px-3 py-2 text-left">Timestamp</th>
-                  <th className="px-3 py-2 text-left">Utente</th>
-                  <th className="px-3 py-2 text-left">Azione</th>
-                  <th className="px-3 py-2 text-left">Risorsa</th>
-                  <th className="px-3 py-2 text-left">IP</th>
-                  <th className="px-3 py-2 text-left">Stato</th>
+                  <SortTh label="Timestamp" sortKey="timestamp" current={auditSort.sortKey} dir={auditSort.sortDir} onSort={auditSort.requestSort}/>
+                  <SortTh label="Utente" sortKey="username" current={auditSort.sortKey} dir={auditSort.sortDir} onSort={auditSort.requestSort}/>
+                  <SortTh label="Azione" sortKey="action" current={auditSort.sortKey} dir={auditSort.sortDir} onSort={auditSort.requestSort}/>
+                  <SortTh label="Risorsa" sortKey="resource_id" current={auditSort.sortKey} dir={auditSort.sortDir} onSort={auditSort.requestSort}/>
+                  <SortTh label="IP" sortKey="ip_address" current={auditSort.sortKey} dir={auditSort.sortDir} onSort={auditSort.requestSort}/>
+                  <SortTh label="Stato" sortKey="status" current={auditSort.sortKey} dir={auditSort.sortDir} onSort={auditSort.requestSort}/>
                 </tr>
               </thead>
               <tbody>
-                {logs.map(l => (
+                {auditSort.sortFn(logs).map(l => (
                   <React.Fragment key={l.id}>
                     <tr className="border-t border-slate-700 hover:bg-slate-700/30 cursor-pointer" onClick={() => setExpanded(expanded === l.id ? null : l.id)}>
                       <td className="px-3 py-2 text-slate-500">{expanded === l.id ? <ChevronDown className="w-3.5 h-3.5"/> : <ChevronRight className="w-3.5 h-3.5"/>}</td>
@@ -4231,6 +4561,7 @@ const UsersModal = ({ onClose }) => {
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ username: '', password: '', role: 'viewer', is_active: true });
   const [loading, setLoading] = useState(false);
+  const userSort = useSortable('username', 'asc');
 
   const fetchUsers = async () => {
     try {
@@ -4295,10 +4626,15 @@ const UsersModal = ({ onClose }) => {
           </div>
           <table className="w-full text-sm">
             <thead className="bg-slate-900/50 text-slate-400 text-xs uppercase">
-              <tr><th className="px-3 py-2 text-left">Username</th><th className="px-3 py-2 text-left">Ruolo</th><th className="px-3 py-2 text-left">Stato</th><th className="px-3 py-2 text-right">Azioni</th></tr>
+              <tr>
+                <SortTh label="Username" sortKey="username" current={userSort.sortKey} dir={userSort.sortDir} onSort={userSort.requestSort}/>
+                <SortTh label="Ruolo" sortKey="role" current={userSort.sortKey} dir={userSort.sortDir} onSort={userSort.requestSort}/>
+                <SortTh label="Stato" sortKey="is_active" current={userSort.sortKey} dir={userSort.sortDir} onSort={userSort.requestSort}/>
+                <th className="px-3 py-2 text-right">Azioni</th>
+              </tr>
             </thead>
             <tbody>
-              {users.map(u => (
+              {userSort.sortFn(users).map(u => (
                 <tr key={u.id} className="border-t border-slate-700">
                   <td className="px-3 py-2 font-medium">{u.username}</td>
                   <td className={`px-3 py-2 font-bold uppercase text-xs ${roleColor(u.role)}`}>{u.role}</td>

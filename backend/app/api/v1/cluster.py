@@ -10,6 +10,8 @@ from app.core.security import require_any, require_admin, require_operator_or_ad
 from app.core.audit import log_action
 from cryptography.fernet import Fernet
 from typing import List
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from app.core.cache import cache_get, cache_set, cache_key
 
 router = APIRouter(dependencies=[Depends(require_any)])
 settings = get_settings()
@@ -77,20 +79,32 @@ def _get_cluster_or_404(cluster_id: int, db: Session) -> Cluster:
 
 @router.get("/{cluster_id}/vms")
 def list_cluster_vms(cluster_id: int, db: Session = Depends(get_db)):
+    ck = cache_key("vms", cluster_id)
+    hit = cache_get(ck)
+    if hit:
+        return hit
     cluster = _get_cluster_or_404(cluster_id, db)
     try:
         svc = ProxmoxService(cluster)
-        return svc.get_all_vms()
+        data = svc.get_all_vms()
+        cache_set(ck, data, ttl=5)
+        return data
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
 
 
 @router.get("/{cluster_id}/nodes")
 def list_cluster_nodes(cluster_id: int, db: Session = Depends(get_db)):
+    ck = cache_key("nodes", cluster_id)
+    hit = cache_get(ck)
+    if hit:
+        return hit
     cluster = _get_cluster_or_404(cluster_id, db)
     try:
         svc = ProxmoxService(cluster)
-        return svc.proxmox.nodes.get()
+        data = svc.proxmox.nodes.get()
+        cache_set(ck, data, ttl=8)
+        return data
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
 
@@ -111,12 +125,106 @@ def node_action(cluster_id: int, node: str, action: str, request: Request, db: S
         raise HTTPException(status_code=502, detail=str(e))
 
 
+@router.get("/{cluster_id}/overview")
+def cluster_overview(cluster_id: int, timeframe: str = "hour", db: Session = Depends(get_db)):
+    """Dati aggregati cluster: nodes, vms, storage, rrddata per nodo."""
+    ck = cache_key("overview", cluster_id, timeframe)
+    hit = cache_get(ck)
+    if hit:
+        return hit
+    cluster = _get_cluster_or_404(cluster_id, db)
+    try:
+        svc = ProxmoxService(cluster)
+
+        # Fase 1: fetch rapido in parallelo (tutto via cluster.resources + nodes)
+        nodes = svc.proxmox.nodes.get()
+        vms = svc.get_all_vms()
+
+        # Storage via cluster.resources (0.02s) anziché nodes(n).storage.get() (13s+)
+        raw_storage = svc.proxmox.cluster.resources.get(type="storage")
+        storage = []
+        for s in raw_storage:
+            storage.append({
+                "storage": s.get("storage"),
+                "node": s.get("node"),
+                "type": s.get("plugintype", ""),
+                "content": s.get("content", ""),
+                "used": s.get("disk", 0),
+                "total": s.get("maxdisk", 0),
+                "active": 1 if s.get("status") == "available" else 0,
+                "enabled": 1,
+                "shared": s.get("shared", 0),
+            })
+
+        # Fase 2: rrddata per nodi online
+        online_nodes = [n for n in nodes if n.get("status") == "online"]
+        rrddata = {}
+        for n in online_nodes:
+            try:
+                rrddata[n["node"]] = svc.proxmox.nodes(n["node"]).rrddata.get(timeframe=timeframe)
+            except:
+                rrddata[n["node"]] = []
+
+        result = {"nodes": nodes, "vms": vms, "storage": storage, "rrddata": rrddata}
+        cache_set(ck, result, ttl=5)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
 @router.get("/{cluster_id}/nodes/{node}/status")
 def node_status(cluster_id: int, node: str, db: Session = Depends(get_db)):
     cluster = _get_cluster_or_404(cluster_id, db)
     try:
         svc = ProxmoxService(cluster)
         return svc.proxmox.nodes(node).status.get()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get("/{cluster_id}/nodes/{node}/summary")
+def node_summary(cluster_id: int, node: str, timeframe: str = "hour", db: Session = Depends(get_db)):
+    """Dati aggregati del nodo: status, storage, updates, network, rrddata, vms."""
+    ck = cache_key("node_summary", cluster_id, node, timeframe)
+    hit = cache_get(ck)
+    if hit:
+        return hit
+    cluster = _get_cluster_or_404(cluster_id, db)
+    try:
+        svc = ProxmoxService(cluster)
+
+        status = svc.proxmox.nodes(node).status.get()
+        vms_all = svc.get_all_vms()
+        vms = [v for v in vms_all if v.get("node") == node]
+
+        # Storage via cluster.resources (veloce, evita timeout su storage offline)
+        raw_storage = svc.proxmox.cluster.resources.get(type="storage")
+        storage = []
+        for s in raw_storage:
+            if s.get("node") == node:
+                storage.append({
+                    "storage": s.get("storage"),
+                    "node": s.get("node"),
+                    "type": s.get("plugintype", ""),
+                    "content": s.get("content", ""),
+                    "used": s.get("disk", 0),
+                    "total": s.get("maxdisk", 0),
+                    "active": 1 if s.get("status") == "available" else 0,
+                    "enabled": 1,
+                    "shared": s.get("shared", 0),
+                })
+
+        try: updates = svc.proxmox.nodes(node).apt.update.get()
+        except: updates = []
+        try: network = svc.proxmox.nodes(node).network.get()
+        except: network = []
+        try: rrddata = svc.proxmox.nodes(node).rrddata.get(timeframe=timeframe)
+        except: rrddata = []
+
+        result = {"status": status, "storage": storage, "updates": updates,
+                  "network": network, "rrddata": rrddata, "vms": vms}
+        cache_set(ck, result, ttl=5)
+        return result
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
 
@@ -207,14 +315,19 @@ def storage_download_url(cluster_id: int, node: str, storage: str, payload: dict
 @router.get("/{cluster_id}/nodes/{node}/backups")
 def node_backups(cluster_id: int, node: str, storage: str = None, vmid: int = None, db: Session = Depends(get_db)):
     """Lista backup del nodo (tutti gli storage o filtrati)."""
+    ck = cache_key("backups", cluster_id, node, storage or "", vmid or "")
+    hit = cache_get(ck)
+    if hit is not None:
+        return hit
     cluster = _get_cluster_or_404(cluster_id, db)
     try:
         svc = ProxmoxService(cluster)
         if storage:
             stores = [storage]
         else:
-            st = svc.proxmox.nodes(node).storage.get()
-            stores = [s["storage"] for s in st if s.get("active") and "backup" in (s.get("content") or "")]
+            # cluster.resources è veloce, evita timeout su storage offline
+            raw = svc.proxmox.cluster.resources.get(type="storage")
+            stores = [s["storage"] for s in raw if s.get("node") == node and s.get("status") == "available" and "backup" in (s.get("content") or "")]
         results = []
         for s in stores:
             try:
@@ -226,6 +339,7 @@ def node_backups(cluster_id: int, node: str, storage: str = None, vmid: int = No
             except Exception:
                 continue
         results.sort(key=lambda x: x.get("ctime", 0), reverse=True)
+        cache_set(ck, results, ttl=15)
         return results
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
@@ -314,10 +428,32 @@ def next_vmid(cluster_id: int, db: Session = Depends(get_db)):
 
 @router.get("/{cluster_id}/nodes/{node}/storage")
 def node_storage(cluster_id: int, node: str, db: Session = Depends(get_db)):
+    ck = cache_key("node_storage", cluster_id, node)
+    hit = cache_get(ck)
+    if hit is not None:
+        return hit
     cluster = _get_cluster_or_404(cluster_id, db)
     try:
         svc = ProxmoxService(cluster)
-        return svc.proxmox.nodes(node).storage.get()
+        # cluster.resources è molto più veloce di nodes(node).storage.get()
+        # (evita timeout su storage NFS/PBS offline)
+        raw = svc.proxmox.cluster.resources.get(type="storage")
+        data = []
+        for s in raw:
+            if s.get("node") == node:
+                data.append({
+                    "storage": s.get("storage"),
+                    "node": s.get("node"),
+                    "type": s.get("plugintype", ""),
+                    "content": s.get("content", ""),
+                    "used": s.get("disk", 0),
+                    "total": s.get("maxdisk", 0),
+                    "active": 1 if s.get("status") == "available" else 0,
+                    "enabled": 1,
+                    "shared": s.get("shared", 0),
+                })
+        cache_set(ck, data, ttl=10)
+        return data
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
 
@@ -366,10 +502,16 @@ def node_services(cluster_id: int, node: str, db: Session = Depends(get_db)):
 @router.get("/{cluster_id}/storage")
 def cluster_storage(cluster_id: int, db: Session = Depends(get_db)):
     """Storage del cluster (risorse aggregate tra nodi)."""
+    ck = cache_key("storage", cluster_id)
+    hit = cache_get(ck)
+    if hit:
+        return hit
     cluster = _get_cluster_or_404(cluster_id, db)
     try:
         svc = ProxmoxService(cluster)
-        return svc.proxmox.cluster.resources.get(type="storage")
+        data = svc.proxmox.cluster.resources.get(type="storage")
+        cache_set(ck, data, ttl=10)
+        return data
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
 
@@ -414,6 +556,52 @@ def task_status(cluster_id: int, node: str, upid: str, db: Session = Depends(get
     try:
         svc = ProxmoxService(cluster)
         return svc.proxmox.nodes(node).tasks(upid).status.get()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get("/{cluster_id}/nodes/{node}/create-wizard-data")
+def create_wizard_data(cluster_id: int, node: str, kind: str = "lxc", db: Session = Depends(get_db)):
+    """Dati aggregati per il wizard creazione VM/CT: vmid, storage, network, template/ISO."""
+    cluster = _get_cluster_or_404(cluster_id, db)
+    try:
+        svc = ProxmoxService(cluster)
+        result = {}
+
+        def fetch_vmid():
+            result["vmid"] = svc.proxmox.cluster.nextid.get()
+
+        def fetch_storage():
+            result["storage"] = svc.proxmox.nodes(node).storage.get()
+
+        def fetch_network():
+            result["network"] = svc.proxmox.nodes(node).network.get()
+
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            futures = [pool.submit(f) for f in [fetch_vmid, fetch_storage, fetch_network]]
+            for f in as_completed(futures):
+                f.result()  # raise if error
+
+        # Fetch contenuti template/ISO in parallelo
+        wanted = "vztmpl" if kind == "lxc" else "iso"
+        content_stores = [s for s in result["storage"] if s.get("active") and wanted in (s.get("content") or "")]
+
+        def fetch_content(store_name):
+            try:
+                items = svc.proxmox.nodes(node).storage(store_name).content.get(content=wanted)
+                return [{"_storage": store_name, **item} for item in items]
+            except Exception:
+                return []
+
+        contents = []
+        if content_stores:
+            with ThreadPoolExecutor(max_workers=min(len(content_stores), 6)) as pool:
+                futures = [pool.submit(fetch_content, s["storage"]) for s in content_stores]
+                for f in as_completed(futures):
+                    contents.extend(f.result())
+
+        result["contents"] = contents
+        return result
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
 
@@ -605,6 +793,80 @@ def fw_cluster_set_options(cluster_id: int, payload: dict, db: Session = Depends
         raise HTTPException(status_code=502, detail=str(e))
 
 
+@router.get("/{cluster_id}/firewall/log")
+def fw_cluster_log(cluster_id: int, limit: int = 200, db: Session = Depends(get_db)):
+    """Log firewall aggregato da tutti i nodi del cluster."""
+    cluster = _get_cluster_or_404(cluster_id, db)
+    try:
+        svc = ProxmoxService(cluster)
+        nodes = svc.proxmox.nodes.get()
+        all_logs = []
+
+        def fetch_node_log(node_name):
+            try:
+                entries = svc.proxmox.nodes(node_name).firewall.log.get(limit=limit)
+                return [(node_name, e) for e in entries if e.get("t") and e["t"] != "no content"]
+            except Exception:
+                return []
+
+        with ThreadPoolExecutor(max_workers=min(len(nodes), 8)) as pool:
+            futures = {pool.submit(fetch_node_log, n["node"]): n["node"] for n in nodes}
+            for f in as_completed(futures):
+                all_logs.extend(f.result())
+
+        # Ordina per numero sequenza decrescente (più recenti prima) con nodo come tiebreaker
+        all_logs.sort(key=lambda x: x[1].get("n", 0), reverse=True)
+        return [{"node": node, "n": entry["n"], "t": entry["t"]} for node, entry in all_logs]
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.put("/{cluster_id}/firewall/log-level", dependencies=[Depends(require_admin)])
+def fw_cluster_set_log_level(cluster_id: int, payload: dict, db: Session = Depends(get_db)):
+    """Imposta log_level_in/out su tutte le VM/CT del cluster."""
+    cluster = _get_cluster_or_404(cluster_id, db)
+    level = payload.get("level", "info")  # info, nolog, warning, err, debug
+    direction = payload.get("direction", "both")  # in, out, both
+    try:
+        svc = ProxmoxService(cluster)
+        vms = svc.get_all_vms()
+        results = {"ok": 0, "errors": 0, "details": []}
+
+        def apply_log_level(vm):
+            node = vm.get("node")
+            vmid = vm.get("vmid")
+            vtype = vm.get("type", "qemu")
+            try:
+                if vtype == "lxc":
+                    handle = svc.proxmox.nodes(node).lxc(vmid)
+                else:
+                    handle = svc.proxmox.nodes(node).qemu(vmid)
+                opts = {}
+                if direction in ("in", "both"):
+                    opts["log_level_in"] = level
+                if direction in ("out", "both"):
+                    opts["log_level_out"] = level
+                handle.firewall.options.put(**opts)
+                return {"vmid": vmid, "node": node, "status": "ok"}
+            except Exception as e:
+                return {"vmid": vmid, "node": node, "status": "error", "detail": str(e)}
+
+        with ThreadPoolExecutor(max_workers=min(len(vms), 8)) as pool:
+            futures = [pool.submit(apply_log_level, vm) for vm in vms]
+            for f in as_completed(futures):
+                r = f.result()
+                if r["status"] == "ok":
+                    results["ok"] += 1
+                else:
+                    results["errors"] += 1
+                results["details"].append(r)
+
+        results["total"] = len(vms)
+        return results
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
 def _vm_handle(svc, node: str, vmid: int):
     """Ritorna (handle, type) gestendo sia QEMU che LXC."""
     vms = svc.get_all_vms()
@@ -619,12 +881,18 @@ def _vm_handle(svc, node: str, vmid: int):
 
 @router.get("/{cluster_id}/vms/{node}/{vmid}/config")
 def vm_get_config(cluster_id: int, node: str, vmid: int, db: Session = Depends(get_db)):
+    ck = cache_key("vm_config", cluster_id, node, vmid)
+    hit = cache_get(ck)
+    if hit is not None:
+        return hit
     cluster = _get_cluster_or_404(cluster_id, db)
     try:
         svc = ProxmoxService(cluster)
         handle, vtype = _vm_handle(svc, node, vmid)
         cfg = handle.config.get()
-        return {"type": vtype, "config": cfg}
+        data = {"type": vtype, "config": cfg}
+        cache_set(ck, data, ttl=5)
+        return data
     except HTTPException:
         raise
     except Exception as e:
@@ -634,11 +902,17 @@ def vm_get_config(cluster_id: int, node: str, vmid: int, db: Session = Depends(g
 @router.get("/{cluster_id}/vms/{node}/{vmid}/rrddata")
 def vm_rrddata(cluster_id: int, node: str, vmid: int, timeframe: str = "hour", db: Session = Depends(get_db)):
     """Dati storici VM (cpu, mem, net, disk)."""
+    ck = cache_key("vm_rrd", cluster_id, node, vmid, timeframe)
+    hit = cache_get(ck)
+    if hit is not None:
+        return hit
     cluster = _get_cluster_or_404(cluster_id, db)
     try:
         svc = ProxmoxService(cluster)
         handle, _ = _vm_handle(svc, node, vmid)
-        return handle.rrddata.get(timeframe=timeframe, cf="AVERAGE")
+        data = handle.rrddata.get(timeframe=timeframe, cf="AVERAGE")
+        cache_set(ck, data, ttl=5)
+        return data
     except HTTPException:
         raise
     except Exception as e:
@@ -647,11 +921,17 @@ def vm_rrddata(cluster_id: int, node: str, vmid: int, timeframe: str = "hour", d
 
 @router.get("/{cluster_id}/vms/{node}/{vmid}/status")
 def vm_get_status(cluster_id: int, node: str, vmid: int, db: Session = Depends(get_db)):
+    ck = cache_key("vm_status", cluster_id, node, vmid)
+    hit = cache_get(ck)
+    if hit is not None:
+        return hit
     cluster = _get_cluster_or_404(cluster_id, db)
     try:
         svc = ProxmoxService(cluster)
         handle, _ = _vm_handle(svc, node, vmid)
-        return handle.status.current.get()
+        data = handle.status.current.get()
+        cache_set(ck, data, ttl=3)
+        return data
     except HTTPException:
         raise
     except Exception as e:

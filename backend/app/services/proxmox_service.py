@@ -13,6 +13,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 settings = get_settings()
 cipher = Fernet(settings.ENCRYPTION_KEY)
 
+
 class ProxmoxService:
     def __init__(self, cluster: Cluster):
         self.cluster = cluster
@@ -38,8 +39,6 @@ class ProxmoxService:
         else:
             api = ProxmoxAPI(host, user=self.cluster.auth_user, password=token_or_password,
                              verify_ssl=self.cluster.verify_ssl, port=self.cluster.port, timeout=15)
-        # Test: una chiamata leggera per verificare che il nodo risponda
-        api.version.get()
         return api
 
     def _connect(self) -> ProxmoxAPI:

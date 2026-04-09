@@ -384,12 +384,12 @@ docker exec glu2k-db psql -U nexus -d nexus_db -c "SELECT username,role,is_activ
 - [x] Grafici storici
 - [x] Temi personalizzabili
 - [x] Layout personalizzabile
-- [ ] Template LXC pronto all'uso
-- [ ] Log firewall aggregato cluster
+- [x] Log firewall aggregato cluster
 - [ ] Backup/snapshot management
 - [ ] Notifiche (Telegram/Email)
 - [ ] Metriche esportabili (Prometheus)
 - [ ] Multi-factor authentication
+- [ ] Template LXC pronto all'uso
 
 ## Licenza
 
