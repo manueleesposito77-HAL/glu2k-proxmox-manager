@@ -1,5 +1,10 @@
 # Glu2k Proxmox Manager
 
+> **⚠️ DISCLAIMER**
+>
+> **Il presente software viene fornito "così com'è", senza garanzie di alcun tipo, esplicite o implicite. L'autore non si assume alcuna responsabilità per eventuali danni diretti, indiretti, incidentali o consequenziali derivanti dall'utilizzo, dalla modifica o dalla distribuzione di questo software. L'utilizzo è interamente a rischio e responsabilità dell'utente.**
+
+
 Web app completa per la gestione centralizzata di più cluster **Proxmox VE** con autenticazione, ruoli, firewall, networking e monitoring in tempo reale.
 
 ![version](https://img.shields.io/badge/version-1.0.0-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![stack](https://img.shields.io/badge/stack-FastAPI%20%2B%20React-purple)
