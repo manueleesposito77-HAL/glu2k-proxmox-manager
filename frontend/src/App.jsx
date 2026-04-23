@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Activity, Server, Database, HardDrive, Cpu, AlertCircle, Plus, X, Shield, ShieldOff, Loader2, Play, Square, Power, RefreshCw, Pencil, MemoryStick, Package, ArrowLeft, Download, Save, Settings, Network, Trash2, Check, Flame, GripVertical, FileText, ChevronRight, ChevronDown, Eye, EyeOff, LayoutGrid, Timer, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Activity, Server, Database, HardDrive, Cpu, AlertCircle, Plus, X, Shield, ShieldOff, Loader2, Play, Square, Power, RefreshCw, Pencil, MemoryStick, Package, ArrowLeft, Download, Save, Settings, Network, Trash2, Check, Flame, GripVertical, FileText, ChevronRight, ChevronDown, Eye, EyeOff, LayoutGrid, Timer, ArrowUpDown, ArrowUp, ArrowDown, Monitor, Disc3, ListOrdered } from 'lucide-react';
 
 const API_BASE = `${window.location.protocol}//${window.location.hostname}:8000/api/v1`;
 
@@ -896,6 +896,11 @@ const NodeDetail = ({ cluster, nodeName, onBack, onSelectVM, refreshInterval = 3
             } catch (err) { alert(traduciErrore(err)); }
           }} title="Shutdown nodo" className="flex items-center gap-1 px-3 py-1.5 bg-red-700 hover:bg-red-600 rounded-lg text-xs font-medium text-white">
             <Power className="w-3.5 h-3.5"/> Shutdown
+          </button>
+          <button onClick={() => {
+            window.open(`https://${cluster.host}:${cluster.port}/?console=shell&novnc=1&node=${nodeName}&resize=off`, '_blank');
+          }} title="Console nodo" className="flex items-center gap-1 px-3 py-1.5 bg-blue-700 hover:bg-blue-600 rounded-lg text-xs font-medium text-white">
+            <Monitor className="w-3.5 h-3.5"/> Console
           </button>
           <button onClick={fetchData} className="p-2 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white">
             <RefreshCw className="w-4 h-4"/>
@@ -1983,11 +1988,329 @@ const buildNetString = (obj, isLxc) => {
   return [first, ...rest].join(',');
 };
 
+const bootDeviceIcon = (dev) => {
+  if (dev.startsWith('net')) return <Network className="w-4 h-4 text-cyan-400"/>;
+  if (dev.startsWith('ide') || dev.startsWith('cd')) return <Disc3 className="w-4 h-4 text-blue-400"/>;
+  if (dev.startsWith('scsi') || dev.startsWith('virtio') || dev.startsWith('sata')) return <HardDrive className="w-4 h-4 text-purple-400"/>;
+  if (dev.startsWith('rootfs')) return <Database className="w-4 h-4 text-green-400"/>;
+  if (dev === 'efidisk0') return <Settings className="w-4 h-4 text-orange-400"/>;
+  return <HardDrive className="w-4 h-4 text-slate-400"/>;
+};
+
+const bootDeviceLabel = (dev, config) => {
+  if (dev.startsWith('net')) {
+    const p = config[dev] ? parseNetString(config[dev]) : {};
+    return `Rete — ${p.bridge || dev}`;
+  }
+  if (config[dev]) {
+    const d = parseDiskString(config[dev]);
+    if (d.media === 'cdrom') {
+      const iso = d.storage === 'none' ? 'vuoto' : (d.volume || '');
+      return `CD-ROM — ${iso}`;
+    }
+    return `${d.storage || ''}:${d.volume || ''} ${d.size ? `(${d.size})` : ''}`.trim();
+  }
+  return dev;
+};
+
+const VMBootOrderSection = ({ cluster, vm, config, onChange }) => {
+  // Proxmox boot format: "order=scsi0;ide2;net0" oppure legacy "cdn"
+  const bootStr = config.boot || '';
+  const orderMatch = bootStr.match(/order=(.+)/);
+  const bootDevices = orderMatch ? orderMatch[1].split(';').filter(Boolean) : [];
+
+  // Tutti i dispositivi avviabili (dischi + reti)
+  const allBootable = Object.keys(config).filter(k =>
+    /^(scsi|virtio|ide|sata|efidisk)\d+$/.test(k) || /^net\d+$/.test(k)
+  ).sort();
+
+  // Dispositivi non ancora nel boot order
+  const available = allBootable.filter(d => !bootDevices.includes(d));
+
+  const [order, setOrder] = useState(bootDevices);
+  const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
+
+  useEffect(() => {
+    const newOrder = orderMatch ? orderMatch[1].split(';').filter(Boolean) : [];
+    setOrder(newOrder);
+    setDirty(false);
+  }, [bootStr]);
+
+  const moveUp = (i) => {
+    if (i <= 0) return;
+    const newOrder = [...order];
+    [newOrder[i - 1], newOrder[i]] = [newOrder[i], newOrder[i - 1]];
+    setOrder(newOrder);
+    setDirty(true);
+  };
+
+  const moveDown = (i) => {
+    if (i >= order.length - 1) return;
+    const newOrder = [...order];
+    [newOrder[i], newOrder[i + 1]] = [newOrder[i + 1], newOrder[i]];
+    setOrder(newOrder);
+    setDirty(true);
+  };
+
+  const removeDevice = (i) => {
+    const newOrder = order.filter((_, idx) => idx !== i);
+    setOrder(newOrder);
+    setDirty(true);
+  };
+
+  const addDevice = (dev) => {
+    setOrder([...order, dev]);
+    setDirty(true);
+  };
+
+  const saveOrder = async () => {
+    setSaving(true);
+    try {
+      await axios.put(`${API_BASE}/clusters/${cluster.id}/vms/${vm.node}/${vm.vmid}/config`, {
+        boot: `order=${order.join(';')}`
+      });
+      setDirty(false);
+      onChange();
+    } catch (err) { alert(traduciErrore(err)); }
+    finally { setSaving(false); }
+  };
+
+  const currentAvailable = allBootable.filter(d => !order.includes(d));
+
+  return (
+    <div className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden mb-6">
+      <div className="p-4 border-b border-slate-700 font-bold flex items-center gap-2">
+        <ListOrdered className="w-4 h-4"/> Ordine di Boot
+      </div>
+      {order.length === 0 ? (
+        <div className="p-4 text-sm text-slate-500">Nessun dispositivo di boot configurato</div>
+      ) : (
+        <div className="divide-y divide-slate-700">
+          {order.map((dev, i) => (
+            <div key={dev} className="flex items-center gap-3 px-4 py-2.5 hover:bg-slate-700/30">
+              <span className="text-xs font-bold text-slate-500 w-5 text-center">{i + 1}</span>
+              {bootDeviceIcon(dev)}
+              <span className="font-mono text-sm text-blue-400 w-20">{dev}</span>
+              <span className="text-sm text-slate-300 flex-1">{bootDeviceLabel(dev, config)}</span>
+              <div className="flex items-center gap-1">
+                <button onClick={() => moveUp(i)} disabled={i === 0}
+                  className="p-1 rounded hover:bg-slate-600 text-slate-400 hover:text-white disabled:opacity-30" title="Sposta su">
+                  <ArrowUp className="w-3.5 h-3.5"/>
+                </button>
+                <button onClick={() => moveDown(i)} disabled={i === order.length - 1}
+                  className="p-1 rounded hover:bg-slate-600 text-slate-400 hover:text-white disabled:opacity-30" title="Sposta giù">
+                  <ArrowDown className="w-3.5 h-3.5"/>
+                </button>
+                <button onClick={() => removeDevice(i)}
+                  className="p-1 rounded hover:bg-red-900/40 text-slate-400 hover:text-red-400" title="Rimuovi dal boot">
+                  <X className="w-3.5 h-3.5"/>
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {currentAvailable.length > 0 && (
+        <div className="px-4 py-3 border-t border-slate-700 bg-slate-900/30">
+          <p className="text-xs text-slate-500 mb-2">Dispositivi disponibili:</p>
+          <div className="flex flex-wrap gap-2">
+            {currentAvailable.map(dev => (
+              <button key={dev} onClick={() => addDevice(dev)}
+                className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-700 hover:bg-slate-600 rounded text-xs text-slate-300">
+                <Plus className="w-3 h-3"/> {bootDeviceIcon(dev)} {dev}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {dirty && (
+        <div className="px-4 py-3 border-t border-slate-700 flex items-center justify-between bg-blue-900/10">
+          <span className="text-xs text-blue-300">Ordine modificato — salva per applicare</span>
+          <button onClick={saveOrder} disabled={saving}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-xs text-white font-medium">
+            {saving ? <Loader2 className="w-3 h-3 animate-spin"/> : <Save className="w-3 h-3"/>} Salva
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const VMDisksSection = ({ cluster, vm, config, diskKeys, onChange }) => {
+  const [cdromEditing, setCdromEditing] = useState(null);
+  const [isoList, setIsoList] = useState([]);
+  const [selectedIso, setSelectedIso] = useState('');
+  const [cdromBusy, setCdromBusy] = useState(false);
+
+  const loadIsos = async (slot) => {
+    setCdromEditing(slot);
+    setSelectedIso('');
+    try {
+      const stRes = await axios.get(`${API_BASE}/clusters/${cluster.id}/nodes/${vm.node}/storage`);
+      const isoStores = (stRes.data || []).filter(s => s.active && (s.content || '').includes('iso'));
+      let allIsos = [];
+      for (const s of isoStores) {
+        try {
+          const cRes = await axios.get(`${API_BASE}/clusters/${cluster.id}/nodes/${vm.node}/storage/${s.storage}/content?content_type=iso`);
+          (cRes.data || []).forEach(f => allIsos.push({ volid: f.volid, label: `${f.volid}` }));
+        } catch {}
+      }
+      setIsoList(allIsos);
+    } catch { setIsoList([]); }
+  };
+
+  const mountIso = async () => {
+    if (!selectedIso || !cdromEditing) return;
+    setCdromBusy(true);
+    try {
+      await axios.put(`${API_BASE}/clusters/${cluster.id}/vms/${vm.node}/${vm.vmid}/config`, {
+        [cdromEditing]: `${selectedIso},media=cdrom`
+      });
+      setCdromEditing(null);
+      onChange();
+    } catch (err) { alert(traduciErrore(err)); }
+    finally { setCdromBusy(false); }
+  };
+
+  const ejectCdrom = async (slot) => {
+    if (!confirm('Smontare il CD-ROM?')) return;
+    setCdromBusy(true);
+    try {
+      await axios.put(`${API_BASE}/clusters/${cluster.id}/vms/${vm.node}/${vm.vmid}/config`, {
+        [slot]: 'none,media=cdrom'
+      });
+      onChange();
+    } catch (err) { alert(traduciErrore(err)); }
+    finally { setCdromBusy(false); }
+  };
+
+  return (
+    <div className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden mb-6" style={{order: 0}}>
+      <div className="p-4 border-b border-slate-700 font-bold flex items-center gap-2">
+        <HardDrive className="w-4 h-4"/> Dischi / Volumi
+      </div>
+      {diskKeys.length === 0 ? (
+        <div className="p-4 text-sm text-slate-500">Nessun disco</div>
+      ) : (
+        <table className="w-full text-sm">
+          <thead className="bg-slate-900/50 text-slate-400 text-xs uppercase">
+            <tr>
+              <th className="px-4 py-2 text-left">Slot</th>
+              <th className="px-4 py-2 text-left">Storage</th>
+              <th className="px-4 py-2 text-left">Volume</th>
+              <th className="px-4 py-2 text-left">Size</th>
+              <th className="px-4 py-2 text-left">Opzioni</th>
+              <th className="px-4 py-2 text-right">Azioni</th>
+            </tr>
+          </thead>
+          <tbody>
+            {[...diskKeys].sort((a, b) => {
+              const aCd = parseDiskString(config[a]).media === 'cdrom' ? 1 : 0;
+              const bCd = parseDiskString(config[b]).media === 'cdrom' ? 1 : 0;
+              if (aCd !== bCd) return aCd - bCd;
+              return a.localeCompare(b);
+            }).map(k => {
+              const d = parseDiskString(config[k]);
+              const isCdrom = d.media === 'cdrom';
+              const isEmpty = d.storage === 'none';
+              const extraKeys = Object.keys(d).filter(x => !['storage','volume','size','media'].includes(x));
+              return (
+                <React.Fragment key={k}>
+                  <tr className="border-t border-slate-700">
+                    <td className="px-4 py-2 font-mono text-purple-400 text-xs">
+                      <span className="inline-flex items-center gap-1.5">
+                        {isCdrom
+                          ? <Disc3 className="w-3.5 h-3.5 text-blue-400"/>
+                          : k.startsWith('rootfs')
+                            ? <Database className="w-3.5 h-3.5 text-green-400"/>
+                            : k.startsWith('mp')
+                              ? <Package className="w-3.5 h-3.5 text-yellow-400"/>
+                              : <HardDrive className="w-3.5 h-3.5 text-purple-400"/>
+                        }
+                        {k}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2 font-medium text-sm">{isEmpty && isCdrom ? <span className="text-slate-500 italic">vuoto</span> : (d.storage || '-')}</td>
+                    <td className="px-4 py-2 font-mono text-xs text-slate-300">{isEmpty && isCdrom ? '-' : (d.volume || '-')}</td>
+                    <td className="px-4 py-2 font-mono text-xs text-slate-400">{d.size || '-'}</td>
+                    <td className="px-4 py-2 text-xs text-slate-400">
+                      {extraKeys.length === 0 ? (isCdrom ? 'media=cdrom' : '-') : extraKeys.map(x => `${x}=${d[x]}`).join(', ')}
+                    </td>
+                    <td className="px-4 py-2 text-right">
+                      {isCdrom && (
+                        <div className="flex justify-end gap-1">
+                          <button onClick={() => cdromEditing === k ? setCdromEditing(null) : loadIsos(k)}
+                            disabled={cdromBusy}
+                            className="flex items-center gap-1 px-2 py-1 bg-blue-700 hover:bg-blue-600 rounded text-xs text-white disabled:opacity-50">
+                            <Download className="w-3 h-3"/> {cdromEditing === k ? 'Chiudi' : 'Monta ISO'}
+                          </button>
+                          {!isEmpty && (
+                            <button onClick={() => ejectCdrom(k)}
+                              disabled={cdromBusy}
+                              className="flex items-center gap-1 px-2 py-1 bg-yellow-700 hover:bg-yellow-600 rounded text-xs text-white disabled:opacity-50">
+                              <X className="w-3 h-3"/> Smonta
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                  {isCdrom && cdromEditing === k && (
+                    <tr className="border-t border-slate-700/50 bg-slate-900/30">
+                      <td colSpan="6" className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <select value={selectedIso} onChange={e => setSelectedIso(e.target.value)}
+                            className="flex-1 bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm font-mono text-slate-200">
+                            <option value="">— Seleziona ISO —</option>
+                            {isoList.map(iso => (
+                              <option key={iso.volid} value={iso.volid}>{iso.label}</option>
+                            ))}
+                          </select>
+                          <button onClick={mountIso} disabled={!selectedIso || cdromBusy}
+                            className="flex items-center gap-1 px-3 py-1.5 bg-green-700 hover:bg-green-600 rounded text-xs text-white disabled:opacity-50">
+                            {cdromBusy ? <Loader2 className="w-3 h-3 animate-spin"/> : <Check className="w-3 h-3"/>} Monta
+                          </button>
+                        </div>
+                        {isoList.length === 0 && <p className="text-xs text-slate-500 mt-2">Nessuna ISO trovata negli storage del nodo.</p>}
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+};
+
 const VMNetworkSection = ({ cluster, vm, vtype, config, netKeys, onChange }) => {
   const [editing, setEditing] = useState(null); // key of editing iface or 'new'
   const [form, setForm] = useState({});
   const [busy, setBusy] = useState(false);
+  const [agentIPs, setAgentIPs] = useState({});
   const isLxc = vtype === 'lxc';
+
+  useEffect(() => {
+    if (isLxc) return;
+    axios.get(`${API_BASE}/clusters/${cluster.id}/vms/${vm.node}/${vm.vmid}/interfaces`)
+      .then(res => {
+        const map = {};
+        (res.data.interfaces || []).forEach(iface => {
+          const ips = (iface['ip-addresses'] || [])
+            .filter(a => a['ip-address-type'] === 'ipv4' && !a['ip-address'].startsWith('127.'))
+            .map(a => a['ip-address']);
+          if (ips.length > 0) {
+            const mac = (iface['hardware-address'] || '').toLowerCase();
+            map[mac] = ips.join(', ');
+          }
+        });
+        setAgentIPs(map);
+      })
+      .catch(() => {});
+  }, [cluster.id, vm.node, vm.vmid, isLxc]);
 
   const startEdit = (key) => {
     setForm(parseNetString(config[key]));
@@ -2043,7 +2366,7 @@ const VMNetworkSection = ({ cluster, vm, vtype, config, netKeys, onChange }) => 
               {!isLxc && <th className="px-3 py-2 text-left">Modello</th>}
               <th className="px-3 py-2 text-left">Bridge</th>
               <th className="px-3 py-2 text-left">MAC</th>
-              {isLxc && <th className="px-3 py-2 text-left">IP</th>}
+              <th className="px-3 py-2 text-left">IP</th>
               {isLxc && <th className="px-3 py-2 text-left">Gateway</th>}
               <th className="px-3 py-2 text-left">VLAN</th>
               <th className="px-3 py-2 text-left">Firewall</th>
@@ -2060,7 +2383,7 @@ const VMNetworkSection = ({ cluster, vm, vtype, config, netKeys, onChange }) => 
                   {!isLxc && <td className="px-3 py-2 uppercase text-xs">{p.model || '-'}</td>}
                   <td className="px-3 py-2 font-mono text-xs">{p.bridge || '-'}</td>
                   <td className="px-3 py-2 font-mono text-xs text-slate-400">{p.hwaddr || '-'}</td>
-                  {isLxc && <td className="px-3 py-2 font-mono text-xs text-slate-300">{p.ip || '-'}</td>}
+                  <td className="px-3 py-2 font-mono text-xs text-green-400">{isLxc ? (p.ip || '-') : (agentIPs[(p.hwaddr || '').toLowerCase()] || <span className="text-slate-500">—</span>)}</td>
                   {isLxc && <td className="px-3 py-2 font-mono text-xs text-slate-400">{p.gw || '-'}</td>}
                   <td className="px-3 py-2 font-mono text-xs">{p.tag || '-'}</td>
                   <td className="px-3 py-2">
@@ -2285,6 +2608,7 @@ const VMDetail = ({ cluster, vm, onBack, refreshInterval = 3 }) => {
     { id: 'fwlog', title: 'Log Firewall VM' },
     { id: 'network', title: 'Interfacce di Rete VM' },
     { id: 'disks', title: 'Dischi / Volumi' },
+    { id: 'boot', title: 'Ordine di Boot' },
     { id: 'snapshots', title: 'Snapshot' },
     { id: 'backups', title: 'Backup' },
     { id: 'tasks', title: 'Log Tasks VM' },
@@ -2359,6 +2683,12 @@ const VMDetail = ({ cluster, vm, onBack, refreshInterval = 3 }) => {
               </button>
             </>
           )}
+          <button onClick={() => {
+            const ctype = vtype === 'lxc' ? 'lxc' : 'kvm';
+            window.open(`https://${cluster.host}:${cluster.port}/?console=${ctype}&novnc=1&vmid=${vm.vmid}&vmname=${encodeURIComponent(vm.name)}&node=${vm.node}&resize=off`, '_blank');
+          }} className="flex items-center gap-2 px-3 py-2 bg-blue-700 hover:bg-blue-600 rounded-lg text-sm">
+            <Monitor className="w-4 h-4"/> Console
+          </button>
         </div>
       </div>
 
@@ -2523,43 +2853,11 @@ const VMDetail = ({ cluster, vm, onBack, refreshInterval = 3 }) => {
       )}
 
       {vmIsVisible('disks') && (
-      <div className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden mb-6" style={{order: vmOrder('disks')}}>
-        <div className="p-4 border-b border-slate-700 font-bold flex items-center gap-2">
-          <HardDrive className="w-4 h-4"/> Dischi / Volumi
-        </div>
-        {diskKeys.length === 0 ? (
-          <div className="p-4 text-sm text-slate-500">Nessun disco</div>
-        ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-slate-900/50 text-slate-400 text-xs uppercase">
-              <tr>
-                <th className="px-4 py-2 text-left">Slot</th>
-                <th className="px-4 py-2 text-left">Storage</th>
-                <th className="px-4 py-2 text-left">Volume</th>
-                <th className="px-4 py-2 text-left">Size</th>
-                <th className="px-4 py-2 text-left">Opzioni</th>
-              </tr>
-            </thead>
-            <tbody>
-              {diskKeys.map(k => {
-                const d = parseDiskString(config[k]);
-                const extraKeys = Object.keys(d).filter(x => !['storage','volume','size'].includes(x));
-                return (
-                  <tr key={k} className="border-t border-slate-700">
-                    <td className="px-4 py-2 font-mono text-purple-400 text-xs">{k}</td>
-                    <td className="px-4 py-2 font-medium text-sm">{d.storage || '-'}</td>
-                    <td className="px-4 py-2 font-mono text-xs text-slate-300">{d.volume || '-'}</td>
-                    <td className="px-4 py-2 font-mono text-xs text-slate-400">{d.size || '-'}</td>
-                    <td className="px-4 py-2 text-xs text-slate-400">
-                      {extraKeys.length === 0 ? '-' : extraKeys.map(x => `${x}=${d[x]}`).join(', ')}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
-      </div>
+      <div style={{order: vmOrder('disks')}}><VMDisksSection cluster={cluster} vm={vm} config={config} diskKeys={diskKeys} onChange={fetchData}/></div>
+      )}
+
+      {vmIsVisible('boot') && !isLxc && (
+      <div style={{order: vmOrder('boot')}}><VMBootOrderSection cluster={cluster} vm={vm} config={config} onChange={fetchData}/></div>
       )}
 
       {vmIsVisible('firewall') && (
@@ -3769,6 +4067,12 @@ const ClusterDetail = ({ cluster, onSelectNode, onSelectVM, refreshInterval = 3 
                           </button>
                         </>
                       )}
+                      <button onClick={() => {
+                        const ctype = vm.type === 'lxc' ? 'lxc' : 'kvm';
+                        window.open(`https://${cluster.host}:${cluster.port}/?console=${ctype}&novnc=1&vmid=${vm.vmid}&vmname=${encodeURIComponent(vm.name)}&node=${vm.node}&resize=off`, '_blank');
+                      }} title="Console" className="p-1.5 rounded hover:bg-blue-900/40 text-blue-400">
+                        <Monitor className="w-4 h-4"/>
+                      </button>
                     </div>
                   </td>
                 </tr>

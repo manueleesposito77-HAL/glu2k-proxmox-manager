@@ -1158,3 +1158,30 @@ def vm_action(cluster_id: int, node: str, vmid: int, action: str, request: Reque
         raise
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get("/{cluster_id}/vms/{node}/{vmid}/interfaces")
+def vm_interfaces(cluster_id: int, node: str, vmid: int, db: Session = Depends(get_db)):
+    """Ritorna le interfacce di rete con IP dalla QEMU Guest Agent o config LXC."""
+    cluster = _get_cluster_or_404(cluster_id, db)
+    try:
+        svc = ProxmoxService(cluster)
+        handle, vtype = _vm_handle(svc, node, vmid)
+        if vtype == "qemu":
+            try:
+                result = handle("agent/network-get-interfaces").get()
+                return {"type": "qemu", "interfaces": result.get("result", result)}
+            except Exception:
+                return {"type": "qemu", "interfaces": [], "note": "Guest Agent non disponibile"}
+        else:
+            cfg = handle.config.get()
+            ifaces = []
+            for k, v in cfg.items():
+                if k.startswith("net"):
+                    parts = dict(p.split("=", 1) for p in v.split(",") if "=" in p)
+                    ifaces.append({"name": parts.get("name", k), "ip": parts.get("ip", ""), "gw": parts.get("gw", "")})
+            return {"type": "lxc", "interfaces": ifaces}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))

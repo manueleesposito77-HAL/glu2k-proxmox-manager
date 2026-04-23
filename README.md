@@ -82,6 +82,7 @@ CT_ID=200 CT_HOSTNAME=glu2k MEMORY=4096 DISK_SIZE=16 STORAGE=local-zfs BRIDGE=vm
 - **Lista VM/CT ospitate** sul nodo con link diretto al detail
 - Log firewall nodo con filtri (DROP/ACCEPT/REJECT) + ricerca
 - Aggiornamenti APT disponibili + refresh lista
+- **Console shell nodo**: bottone blu per aprire la shell Proxmox del nodo in una nuova tab
 - Log tasks nodo
 
 ### Wizard creazione VM/CT
@@ -101,7 +102,12 @@ CT_ID=200 CT_HOSTNAME=glu2k MEMORY=4096 DISK_SIZE=16 STORAGE=local-zfs BRIDGE=vm
 - **Firewall VM** con regole drag&drop + toggle enable/disable (applica anche `firewall=1` sulle NIC automaticamente)
 - **Log firewall VM** con filtri e auto-refresh
 - **Interfacce di rete**: aggiungi/modifica/rimuovi NIC (modello, bridge, VLAN, MAC, firewall, rate limit)
-- **Dischi/Volumi**: tabella con storage, volume, size, opzioni
+- **Dischi/Volumi**: tabella con storage, volume, size, opzioni — icone per tipo (disco, CD-ROM, rootfs, mount point)
+  - **Gestione CD-ROM**: monta/smonta ISO con selettore da tutti gli storage del nodo
+  - Ordinamento automatico: dischi prima, CD-ROM dopo
+- **Ordine di Boot**: card dedicata con lista ordinata, frecce su/giù per riordinare, aggiungi/rimuovi dispositivi, salvataggio diretto su Proxmox — icone per tipo dispositivo (disco, CD-ROM, rete, EFI)
+- **Console noVNC**: bottone blu per aprire la console Proxmox della VM/CT in una nuova tab (disponibile anche a VM spenta)
+- **IP nelle interfacce di rete**: visualizzazione IP corrente per VM QEMU (via Guest Agent) e LXC (da config)
 - Azioni: Start, Shutdown (graceful), Stop (forzato), Reboot
 - Log tasks della VM + config raw JSON
 
@@ -316,6 +322,9 @@ pct restore 300 /var/lib/vz/template/cache/glu2k-manager-v1.0.0.tar.zst \
 | Start/Stop/Reboot VM | ✅ | ✅ | ❌ |
 | Modificare config VM | ✅ | ✅ | ❌ |
 | Gestire firewall VM | ✅ | ✅ | ❌ |
+| Monta/smonta ISO CD-ROM | ✅ | ✅ | ❌ |
+| Modifica ordine di boot | ✅ | ✅ | ❌ |
+| Aprire console VM/nodo | ✅ | ✅ | ✅ |
 
 ## Risorse e note operative
 
