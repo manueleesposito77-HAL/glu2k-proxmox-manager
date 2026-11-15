@@ -10,6 +10,11 @@ Web app completa per la gestione centralizzata di più cluster **Proxmox VE** co
 ![version](https://img.shields.io/badge/version-1.0.0-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![stack](https://img.shields.io/badge/stack-FastAPI%20%2B%20React-purple)
 
 ---
+## 📋 Descrizione del progetto
+
+Glu2k Proxmox Manager è una web application completa basata su FastAPI e React progettata per gestire e monitorare in modo centralizzato molteplici cluster e nodi Proxmox VE.
+Offre un sistema di autenticazione multi-ruolo (RBAC con credenziali cifrate AES-256), monitoraggio delle risorse in tempo reale (CPU, RAM, storage, network), gestione avanzata del firewall e della configurazione hardware di macchine virtuali (VM) e container LXC, con procedura guidata per la creazione di nuove istanze e installazione automatica con un singolo comando script helper.
+
 
 ## 🚀 Installazione come container LXC su Proxmox (un comando)
 
